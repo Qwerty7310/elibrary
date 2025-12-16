@@ -5,13 +5,14 @@ import (
 	"elibrary/internal/service"
 	"encoding/json"
 	"net/http"
-	"strings"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
 type BookHandler struct {
-	Service *service.BookService
+	Service        *service.BookService
+	BarcodeService *service.BarcodeService
 }
 
 func (h *BookHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -31,7 +32,8 @@ func (h *BookHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *BookHandler) Get(w http.ResponseWriter, r *http.Request) {
-	idStr := strings.TrimPrefix(r.URL.Path, "/books/")
+	idStr := chi.URLParam(r, "id")
+
 	id, err := uuid.Parse(idStr)
 	if err != nil {
 		http.Error(w, "invalid id", http.StatusBadRequest)
@@ -45,4 +47,41 @@ func (h *BookHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(book)
+}
+
+func (h *BookHandler) Search(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	if q == "" {
+		http.Error(w, "query is required", http.StatusBadRequest)
+		return
+	}
+
+	books, err := h.Service.Search(r.Context(), q)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(books)
+}
+
+func (h *BookHandler) Barcode(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	data, err := h.BarcodeService.Generate(id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "image/png")
+	w.WriteHeader(http.StatusOK)
+	w.Write(data)
 }

@@ -6,19 +6,43 @@ import (
 	"elibrary/internal/service"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func NewRouter(db *pgxpool.Pool) http.Handler {
-	mux := http.NewServeMux()
+	r := chi.NewRouter()
+
+	r.Use(middleware.RequestID)
+	r.Use(middleware.Logger)
+	r.Use(middleware.Recoverer)
 
 	bookRepo := postgres.NewBookRepository(db)
 	bookService := service.NewBookService(bookRepo)
-	bookHandler := &handler.BookHandler{Service: bookService}
+	barcodeService := service.NewBarcodeService()
 
-	mux.HandleFunc("/health", handler.Health)
-	mux.HandleFunc("/books", bookHandler.Create)
-	mux.HandleFunc("/books/", bookHandler.Get)
+	bookHandler := &handler.BookHandler{
+		Service:        bookService,
+		BarcodeService: barcodeService,
+	}
 
-	return mux
+	scanHandler := &handler.ScanHandler{
+		BookService: bookService,
+	}
+
+	r.Get("/health", handler.Health)
+	r.Get("/scan/{value}", scanHandler.Scan)
+
+	r.Route("/books", func(r chi.Router) {
+		r.Post("/", bookHandler.Create)
+		r.Get("/search", bookHandler.Search)
+
+		r.Route("/{id}", func(r chi.Router) {
+			r.Get("/", bookHandler.Get)
+			r.Get("/barcode", bookHandler.Barcode)
+		})
+	})
+
+	return r
 }

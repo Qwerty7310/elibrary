@@ -2,9 +2,56 @@ services:
   postgres:
     image: postgres:15
     container_name: elibrary-postgres
+    restart: unless-stopped
+
     environment:
       POSTGRES_DB: elibrary
       POSTGRES_USER: elibrary
       POSTGRES_PASSWORD: elibrary
+
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U elibrary" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  migrate:
+    image: migrate/migrate
+    container_name: elibrary-migrate
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    volumes:
+      - ./migrations:/migrations
+
+    command:
+      [
+        "-path", "/migrations",
+        "-database",
+        "postgres://elibrary:elibrary@postgres:5432/elibrary?sslmode=disable",
+        "up"
+      ]
+
+  elibrary:
+    build: .
+    container_name: elibrary-app
+    restart: unless-stopped
+
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
     ports:
-      - "5432:5432"
+      - "8080:8080"
+
+    environment:
+      DB_URL: postgres://elibrary:elibrary@postgres:5432/elibrary?sslmode=disable
+      HTTP_ADDR: :8080
+
+volumes:
+  pgdata:

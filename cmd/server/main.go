@@ -13,7 +13,7 @@ import (
 func main() {
 	cfg := config.Load()
 
-	db, err := pgxpool.New(context.Background(), "postgres://elibrary:elibrary@localhost:5432/elibrary")
+	db, err := pgxpool.New(context.Background(), cfg.DBURL)
 	if err != nil {
 		log.Fatal(err)
 	}

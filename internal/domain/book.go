@@ -6,6 +6,7 @@ import (
 
 type Book struct {
 	ID        uuid.UUID
+	Barcode   string
 	Title     string
 	Author    string
 	Publisher string
