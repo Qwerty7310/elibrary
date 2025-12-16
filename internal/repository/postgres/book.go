@@ -104,7 +104,7 @@ func (r *BookRepository) Search(ctx context.Context, query string) ([]domain.Boo
 		SELECT id, barcode, title, author, publisher, year, location, extra
 		FROM books
 		WHERE search_vector @@ plainto_tsquery('russian', $1)
-		ORDER BY ts_rank(search_vector, plainto_tsvector('russian', $1)) DESC
+		ORDER BY ts_rank(search_vector, plainto_tsquery('russian', $1)) DESC
 	`, query)
 	if err != nil {
 		return nil, err

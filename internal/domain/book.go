@@ -5,12 +5,12 @@ import (
 )
 
 type Book struct {
-	ID        uuid.UUID
-	Barcode   string
-	Title     string
-	Author    string
-	Publisher string
-	Year      int
-	Location  string
-	Extra     map[string]any
+	ID        uuid.UUID      `json:"id"`
+	Barcode   string         `json:"barcode"`
+	Title     string         `json:"title"`
+	Author    string         `json:"author"`
+	Publisher string         `json:"publisher"`
+	Year      int            `json:"year"`
+	Location  string         `json:"location"`
+	Extra     map[string]any `json:"extra"`
 }

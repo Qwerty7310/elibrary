@@ -37,21 +37,38 @@ services:
         "up"
       ]
 
-  elibrary:
+  backend:
     build: .
-    container_name: elibrary-app
+    container_name: elibrary-backend
     restart: unless-stopped
 
     depends_on:
       migrate:
         condition: service_completed_successfully
 
-    ports:
-      - "8080:8080"
-
     environment:
       DB_URL: postgres://elibrary:elibrary@postgres:5432/elibrary?sslmode=disable
       HTTP_ADDR: :8080
+
+  frontend:
+    build: ./client
+    container_name: elibrary-frontend
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    container_name: elibrary-nginx
+    restart: unless-stopped
+
+    ports:
+      - "80:80"
+
+    volumes:
+      - ./nginx:/etc/nginx/conf.d
+
+    depends_on:
+      - backend
+      - frontend
 
 volumes:
   pgdata:
