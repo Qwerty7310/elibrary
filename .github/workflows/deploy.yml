@@ -29,7 +29,7 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
-            cd ~/elibrary/elibrary
+            cd ~/elibrary
             docker compose down
             docker compose build --pull
             docker compose up -d
