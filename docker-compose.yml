@@ -1,0 +1,10 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: elibrary-postgres
+    environment:
+      POSTGRES_DB: elibrary
+      POSTGRES_USER: elibrary
+      POSTGRES_PASSWORD: elibrary
+    ports:
+      - "5432:5432"
