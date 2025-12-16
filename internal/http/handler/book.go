@@ -34,8 +34,8 @@ func (h *BookHandler) Get(w http.ResponseWriter, r *http.Request) {
 	idStr := strings.TrimPrefix(r.URL.Path, "/books/")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "invalid id", http.StatusBadRequest
-		return)
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
 	}
 
 	book, err := h.Service.GetByID(r.Context(), id)
