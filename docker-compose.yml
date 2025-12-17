@@ -53,6 +53,10 @@ services:
     expose:
       - "8080"
 
+    networks:
+      - elibrary
+      - web
+
   frontend:
     build: ./client
     container_name: elibrary-frontend
