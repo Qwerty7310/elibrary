@@ -22,7 +22,7 @@ func (h *BookHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	created, err := h.Service.Create(r.Context(), book)
+	created, err := h.Service.CreateBook(r.Context(), book)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
