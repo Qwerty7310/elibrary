@@ -34,20 +34,21 @@ func (h *BookHandler) Create(w http.ResponseWriter, r *http.Request) {
 		default:
 			http.Error(w, "failed to create book", http.StatusInternalServerError)
 		}
+		return
 	}
 
-	responce := map[string]interface{}{
+	response := map[string]interface{}{
 		"book":    created,
 		"message": "Book created successfully",
 	}
 
 	if barcodeImage != nil {
-		responce["barcode_image"] = barcodeImage
+		response["barcode_image"] = barcodeImage
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(responce)
+	json.NewEncoder(w).Encode(response)
 }
 
 func (h *BookHandler) Get(w http.ResponseWriter, r *http.Request) {

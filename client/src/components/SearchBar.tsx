@@ -1,25 +1,30 @@
-import {useState} from "react";
+import {useState} from "react"
 
 interface Props {
     onSearch: (search: string) => void
+    isLoading?: boolean
 }
 
-export function SearchBar({onSearch}: Props) {
-    const [value, setValue] = useState("");
+export function SearchBar({onSearch, isLoading = false}: Props) {
+    const [value, setValue] = useState("")
 
     return (
         <form
+            className="search-bar"
             onSubmit={(e) => {
-                e.preventDefault();
-                onSearch(value);
+                e.preventDefault()
+                onSearch(value)
             }}
         >
             <input
+                type="search"
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
-                placeholder="Search..."
+                placeholder="Название, автор или штрихкод"
             />
-            <button type="submit">Search</button>
+            <button type="submit" disabled={isLoading}>
+                Найти
+            </button>
         </form>
     )
 }

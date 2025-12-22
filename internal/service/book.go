@@ -6,6 +6,7 @@ import (
 	"elibrary/internal/repository"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/google/uuid"
@@ -62,7 +63,8 @@ func (s *BookService) CreateBook(ctx context.Context, book domain.Book) (*domain
 
 	barcodeImage, err := s.barcodeSvc.GenerateBarcodeImage(ean13)
 	if err != nil {
-		fmt.Printf("Warning: failed to generate barcode image: %v\n", err)
+		log.Printf("Warning: failed to generate barcode image: %v\n", err)
+		barcodeImage = nil
 	}
 
 	return &book, barcodeImage, nil
