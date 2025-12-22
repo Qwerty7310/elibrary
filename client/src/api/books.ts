@@ -1,6 +1,11 @@
 import type {Book} from "../types/book"
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8080"
+// const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8080"
+
+// Для продакшена используем путь через Nginx
+const API_URL = window.location.hostname === 'localhost'
+    ? 'http://localhost:8080'  // для локальной разработки
+    : '/elibrary/api'           // для продакшена через Nginx
 
 export async function searchBooks(query: string): Promise<Book[]> {
     const res = await fetch(
