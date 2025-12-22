@@ -18,6 +18,9 @@ services:
       timeout: 5s
       retries: 5
 
+    networks:
+      - elibrary
+
   migrate:
     image: migrate/migrate
     container_name: elibrary-migrate
@@ -36,6 +39,9 @@ services:
         "postgres://elibrary:elibrary@postgres:5432/elibrary?sslmode=disable",
         "up"
       ]
+
+    networks:
+      - elibrary
 
   backend:
     build: .
