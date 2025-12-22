@@ -1,6 +1,7 @@
 package http
 
 import (
+	"elibrary/internal/config"
 	"elibrary/internal/http/handler"
 	"elibrary/internal/repository/postgres"
 	"elibrary/internal/service"
@@ -17,15 +18,23 @@ const (
 	prefix = 200
 )
 
-func NewRouter(db *pgxpool.Pool) http.Handler {
+func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	r := chi.NewRouter()
 
+	allowCredentials := true
+	for _, origin := range cfg.CORSAllowedOrigins {
+		if origin == "*" {
+			allowCredentials = false
+			break
+		}
+	}
+
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:5173", "http://localhost:3000"},
+		AllowedOrigins:   cfg.CORSAllowedOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
 		ExposedHeaders:   []string{"Link"},
-		AllowCredentials: true, // ← Важно: установить true
+		AllowCredentials: allowCredentials,
 		MaxAge:           300,
 	}))
 

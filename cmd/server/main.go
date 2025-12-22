@@ -19,7 +19,7 @@ func main() {
 	}
 	defer db.Close()
 
-	router := httpTransport.NewRouter(db)
+	router := httpTransport.NewRouter(db, cfg)
 
 	log.Println("starting server on", cfg.HTTPAddr)
 	log.Fatal(http.ListenAndServe(cfg.HTTPAddr, router))
