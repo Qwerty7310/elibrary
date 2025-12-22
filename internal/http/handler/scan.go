@@ -16,7 +16,7 @@ type ScanHandler struct {
 func (h *ScanHandler) Scan(w http.ResponseWriter, r *http.Request) {
 	value := chi.URLParam(r, "value")
 
-	book, err := h.BookService.FindByScan(r.Context(), value)
+	books, err := h.BookService.FindByScan(r.Context(), value)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrInvalidBarcode):
@@ -29,6 +29,11 @@ func (h *ScanHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(books) == 0 {
+		http.Error(w, "Not Found", http.StatusNotFound)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(book)
+	_ = json.NewEncoder(w).Encode(books)
 }
