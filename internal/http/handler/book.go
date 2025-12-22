@@ -5,6 +5,7 @@ import (
 	"elibrary/internal/service"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 
@@ -83,17 +84,18 @@ func (h *BookHandler) Search(w http.ResponseWriter, r *http.Request) {
 
 	books, err := h.Service.Search(r.Context(), query)
 	if err != nil {
+		log.Printf("Search error: %#v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	responce := map[string]interface{}{
+	response := map[string]interface{}{
 		"books": books,
 		"count": len(books),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(responce)
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 func (h *BookHandler) Barcode(w http.ResponseWriter, r *http.Request) {

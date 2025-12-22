@@ -4,6 +4,7 @@ import (
 	"elibrary/internal/service"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -18,6 +19,7 @@ func (h *ScanHandler) Scan(w http.ResponseWriter, r *http.Request) {
 
 	books, err := h.BookService.FindByScan(r.Context(), value)
 	if err != nil {
+		log.Printf("Scan error: %#v", err)
 		switch {
 		case errors.Is(err, service.ErrInvalidBarcode):
 			http.Error(w, "Invalid Barcode", http.StatusBadRequest)
