@@ -1,2 +1,0 @@
-ALTER TABLE books
-ADD COLUMN barcode TEXT UNIQUE;
