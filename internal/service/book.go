@@ -121,6 +121,9 @@ func (s *BookService) FindByScan(ctx context.Context, value string) ([]domain.Bo
 		if err == nil {
 			return []domain.Book{book}, nil
 		}
+		if !errors.Is(err, repository.ErrNotFound) {
+			return nil, err
+		}
 	}
 
 	// Поиск по UUID
@@ -130,9 +133,21 @@ func (s *BookService) FindByScan(ctx context.Context, value string) ([]domain.Bo
 		if err == nil {
 			return []domain.Book{book}, nil
 		}
+		if !errors.Is(err, repository.ErrNotFound) {
+			return nil, err
+		}
 	}
 
-	return s.bookRepo.GetByFactoryBarcode(ctx, value)
+	books, err := s.bookRepo.GetByFactoryBarcode(ctx, value)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(books) == 0 {
+		return nil, ErrNotFound
+	}
+
+	return books, nil
 }
 
 func (s *BookService) Search(ctx context.Context, query string) ([]domain.Book, error) {
