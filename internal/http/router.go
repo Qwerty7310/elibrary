@@ -13,6 +13,10 @@ import (
 	"github.com/go-chi/cors"
 )
 
+const (
+	prefix = 200
+)
+
 func NewRouter(db *pgxpool.Pool) http.Handler {
 	r := chi.NewRouter()
 
@@ -30,8 +34,10 @@ func NewRouter(db *pgxpool.Pool) http.Handler {
 	r.Use(middleware.Recoverer)
 
 	bookRepo := postgres.NewBookRepository(db)
-	bookService := service.NewBookService(bookRepo)
-	barcodeService := service.NewBarcodeService()
+	sequenceRepo := postgres.NewSequenceRepository(db)
+
+	barcodeService := service.NewBarcodeService(sequenceRepo, prefix)
+	bookService := service.NewBookService(bookRepo, barcodeService)
 
 	bookHandler := &handler.BookHandler{
 		Service:        bookService,

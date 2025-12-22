@@ -89,7 +89,7 @@ func (s *BarcodeService) GenerateBarcodeImage(ean13 string) ([]byte, error) {
 
 	scaled, err := barcode.Scale(barcodeImg, 300, 150)
 	if err != nil {
-		return nil, fmt.Errorf("failed to scal;e barcode: %w", err)
+		return nil, fmt.Errorf("failed to scale barcode: %w", err)
 	}
 
 	var buf bytes.Buffer

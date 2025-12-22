@@ -4,7 +4,9 @@ import (
 	"elibrary/internal/domain"
 	"elibrary/internal/service"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -22,13 +24,30 @@ func (h *BookHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	created, err := h.Service.CreateBook(r.Context(), book)
+	created, barcodeImage, err := h.Service.CreateBook(r.Context(), book)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		switch {
+		case errors.Is(err, service.ErrBarcodeExists):
+			http.Error(w, "barcode already exists", http.StatusConflict)
+		case errors.Is(err, service.ErrInvalidBarcode):
+			http.Error(w, "invalid barcode", http.StatusBadRequest)
+		default:
+			http.Error(w, "failed to create book", http.StatusInternalServerError)
+		}
 	}
 
+	responce := map[string]interface{}{
+		"book":    created,
+		"message": "Book created successfully",
+	}
+
+	if barcodeImage != nil {
+		responce["barcode_image"] = barcodeImage
+	}
+
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(created)
+	json.NewEncoder(w).Encode(responce)
 }
 
 func (h *BookHandler) Get(w http.ResponseWriter, r *http.Request) {
@@ -42,28 +61,38 @@ func (h *BookHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	book, err := h.Service.GetByID(r.Context(), id)
 	if err != nil {
-		http.Error(w, "not found", http.StatusNotFound)
+		if errors.Is(err, service.ErrNotFound) {
+			http.Error(w, "book not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "failed to get book", http.StatusInternalServerError)
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(book)
 }
 
 func (h *BookHandler) Search(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query().Get("q")
-	if q == "" {
+	query := r.URL.Query().Get("q")
+	if strings.TrimSpace(query) == "" {
 		http.Error(w, "query is required", http.StatusBadRequest)
 		return
 	}
 
-	books, err := h.Service.Search(r.Context(), q)
+	books, err := h.Service.Search(r.Context(), query)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	responce := map[string]interface{}{
+		"books": books,
+		"count": len(books),
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(books)
+	_ = json.NewEncoder(w).Encode(responce)
 }
 
 func (h *BookHandler) Barcode(w http.ResponseWriter, r *http.Request) {
@@ -75,13 +104,22 @@ func (h *BookHandler) Barcode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, err := h.BarcodeService.Generate(id)
+	book, err := h.Service.GetByID(r.Context(), id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		if errors.Is(err, service.ErrNotFound) {
+			http.Error(w, "book not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "failed to get book", http.StatusInternalServerError)
+		return
+	}
+
+	barcodeImage, err := h.BarcodeService.GenerateBarcodeImage(book.Barcode)
+	if err != nil {
+		http.Error(w, "failed to generate barcode image", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "image/png")
-	w.WriteHeader(http.StatusOK)
-	w.Write(data)
+	w.Write(barcodeImage)
 }
