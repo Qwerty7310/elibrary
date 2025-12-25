@@ -1,25 +1,36 @@
-import {type FormEvent, useState} from "react"
+import {type FormEvent, useCallback, useEffect, useRef, useState} from "react"
 import type {Book} from "../types/book"
-import {scanBook, searchBooks} from "../api/books"
+import {createBook, scanBooks, searchBooks} from "../api/books"
 import {SearchBar} from "../components/SearchBar"
+
+type ExtraField = {
+    id: string
+    key: string
+    value: string
+}
 
 type DraftBook = {
     title: string
     author: string
-    barcode: string
+    factoryBarcode: string
     publisher: string
     year: string
     location: string
+    extra: ExtraField[]
 }
 
 const emptyDraft: DraftBook = {
     title: "",
     author: "",
-    barcode: "",
+    factoryBarcode: "",
     publisher: "",
     year: "",
     location: "",
+    extra: [{id: createExtraId(), key: "", value: ""}],
 }
+
+const MAX_QUERY_LENGTH = 100
+const MAX_QUERY_LABEL = 48
 
 function escapeRegExp(value: string) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
@@ -45,11 +56,41 @@ function highlightText(text: string, query: string) {
     )
 }
 
-function createLocalId() {
+function truncateLabel(value: string, maxLength: number) {
+    if (value.length <= maxLength) {
+        return value
+    }
+    return `${value.slice(0, Math.max(0, maxLength - 1))}…`
+}
+
+function isValidUuid(value: string) {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        value
+    )
+}
+
+function isValidEAN13(value: string) {
+    if (!/^\d{13}$/.test(value)) {
+        return false
+    }
+    const digits = value.split("").map((digit) => Number(digit))
+    const checksum = digits.pop()
+    if (checksum === undefined) {
+        return false
+    }
+    const sum = digits.reduce(
+        (acc, digit, index) => acc + digit * (index % 2 === 0 ? 1 : 3),
+        0
+    )
+    const calculated = (10 - (sum % 10)) % 10
+    return calculated === checksum
+}
+
+function createExtraId() {
     if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
         return crypto.randomUUID()
     }
-    return `local-${Date.now()}-${Math.random().toString(16).slice(2)}`
+    return `extra-${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
 export function BookList() {
@@ -60,10 +101,23 @@ export function BookList() {
     const [selectedBook, setSelectedBook] = useState<Book | null>(null)
     const [isAddOpen, setIsAddOpen] = useState(false)
     const [draft, setDraft] = useState<DraftBook>(emptyDraft)
+    const [addError, setAddError] = useState<string | null>(null)
+    const [isAddSaving, setIsAddSaving] = useState(false)
+    const [isScanOpen, setIsScanOpen] = useState(false)
+    const [scanValue, setScanValue] = useState("")
+    const [scanMessage, setScanMessage] = useState<string | null>(null)
+    const [isScanLoading, setIsScanLoading] = useState(false)
+    const [scanHighlight, setScanHighlight] = useState("")
+    const [searchMode, setSearchMode] = useState<"text" | "barcode" | null>(
+        null
+    )
+    const scanInputRef = useRef<HTMLInputElement | null>(null)
 
     async function handleSearch(value: string) {
         const trimmed = value.trim()
         setError(null)
+        setScanHighlight("")
+        setSearchMode("text")
         setQuery(value)
 
         if (!trimmed) {
@@ -71,23 +125,22 @@ export function BookList() {
             return
         }
 
+        if (trimmed.length > MAX_QUERY_LENGTH) {
+            setError(
+                `Превышена допустимая длина запроса (${MAX_QUERY_LENGTH} символов).`
+            )
+            return
+        }
+
         setIsLoading(true)
         try {
-            // сначала пробуем как скан
-            const scannedBook = await scanBook(trimmed)
-            setBooks([scannedBook])
-            return
-        } catch {
-            try {
-                // если не нашли — обычный поиск
-                const result = await searchBooks(trimmed)
-                setBooks(result)
-                if (result.length === 0) {
-                    setError("Ничего не найдено")
-                }
-            } catch {
-                setError("Не удалось выполнить поиск")
+            const result = await searchBooks(trimmed)
+            setBooks(result)
+            if (result.length === 0) {
+                setError("Ничего не найдено")
             }
+        } catch {
+            setError("Не удалось выполнить поиск")
         } finally {
             setIsLoading(false)
         }
@@ -95,26 +148,109 @@ export function BookList() {
 
     function handleOpenAdd() {
         setDraft(emptyDraft)
+        setAddError(null)
         setIsAddOpen(true)
     }
 
-    function handleAddSubmit(event: FormEvent<HTMLFormElement>) {
-        event.preventDefault()
+    async function handleAddSubmit() {
+        setAddError(null)
+        setIsAddSaving(true)
         const yearNumber = draft.year ? Number(draft.year) : undefined
-        const newBook: Book = {
-            id: createLocalId(),
-            barcode: draft.barcode,
-            title: draft.title,
-            author: draft.author,
-            publisher: draft.publisher || undefined,
-            year: Number.isFinite(yearNumber) ? yearNumber : undefined,
-            location: draft.location || undefined,
-        }
+        const extra = draft.extra.reduce<Record<string, unknown>>(
+            (acc, field) => {
+                const key = field.key.trim()
+                if (!key) {
+                    return acc
+                }
+                acc[key] = field.value.trim()
+                return acc
+            },
+            {}
+        )
 
-        setBooks((prev) => [newBook, ...prev])
-        setIsAddOpen(false)
-        setSelectedBook(newBook)
-        setError(null)
+        try {
+            const created = await createBook({
+                title: draft.title.trim(),
+                author: draft.author.trim(),
+                publisher: draft.publisher.trim() || undefined,
+                year: Number.isFinite(yearNumber) ? yearNumber : undefined,
+                location: draft.location.trim() || undefined,
+                factory_barcode: draft.factoryBarcode.trim() || undefined,
+                extra: Object.keys(extra).length > 0 ? extra : undefined,
+            })
+
+            setIsAddOpen(false)
+            setSelectedBook(created)
+            setError(null)
+        } catch (err) {
+            const status = (err as Error & {status?: number}).status
+            if (status === 409) {
+                setAddError("Штрихкод уже существует")
+            } else if (status === 400) {
+                setAddError("Некорректные данные для книги")
+            } else {
+                setAddError("Не удалось сохранить книгу")
+            }
+        } finally {
+            setIsAddSaving(false)
+        }
+    }
+
+    const submitScan = useCallback(
+        async (value: string) => {
+            const trimmed = value.trim()
+            if (!trimmed) {
+                setScanMessage("Введите штрихкод для поиска.")
+                return
+            }
+
+            const valid = isValidEAN13(trimmed) || isValidUuid(trimmed)
+            if (!valid) {
+                setScanMessage("Штрихкод невалиден. Проверьте формат EAN-13.")
+                return
+            }
+
+            setIsScanLoading(true)
+            setScanMessage(null)
+            try {
+                const result = await scanBooks(trimmed)
+                setBooks(result)
+                setQuery("")
+                setSearchMode("barcode")
+                setScanHighlight(trimmed)
+                setSelectedBook(null)
+                setError(null)
+                setIsScanOpen(false)
+            } catch (err) {
+                const status = (err as Error & {status?: number}).status
+                if (status === 400) {
+                    setScanMessage("Штрихкод невалиден. Проверьте формат EAN-13.")
+                } else if (status === 404) {
+                    setIsScanOpen(false)
+                    setDraft((prev) => ({
+                        ...prev,
+                        factoryBarcode: trimmed,
+                    }))
+                    setIsAddOpen(true)
+                } else {
+                    setScanMessage("Не удалось выполнить поиск по штрихкоду.")
+                }
+            } finally {
+                setIsScanLoading(false)
+            }
+        },
+        [setBooks, setError]
+    )
+
+    function handleScanSubmit(event: FormEvent<HTMLFormElement>) {
+        event.preventDefault()
+        void submitScan(scanValue)
+    }
+
+    function handleOpenScan() {
+        setScanValue("")
+        setScanMessage(null)
+        setIsScanOpen(true)
     }
 
     const resultsLabel =
@@ -133,6 +269,74 @@ export function BookList() {
             : value
     }
 
+    function renderBarcodeValue(value?: string) {
+        if (!value) {
+            return "нет данных"
+        }
+        return highlightText(value, scanHighlight || detailsQuery)
+    }
+
+    function renderExtraValue(value: unknown) {
+        if (value === undefined || value === null || value === "") {
+            return "нет данных"
+        }
+        if (typeof value === "string") {
+            return value
+        }
+        return String(value)
+    }
+
+    useEffect(() => {
+        if (!isScanOpen) {
+            return
+        }
+        const handle = window.requestAnimationFrame(() => {
+            scanInputRef.current?.focus()
+        })
+        return () => window.cancelAnimationFrame(handle)
+    }, [isScanOpen])
+
+    useEffect(() => {
+        if (!selectedBook || searchMode !== "barcode") {
+            return
+        }
+
+        const handleKeydown = (event: KeyboardEvent) => {
+            const target = event.target as HTMLElement | null
+            if (
+                target &&
+                (target.tagName === "INPUT" ||
+                    target.tagName === "TEXTAREA" ||
+                    target.isContentEditable)
+            ) {
+                return
+            }
+
+            if (/^\d$/.test(event.key)) {
+                event.preventDefault()
+                if (!isScanOpen) {
+                    setIsScanOpen(true)
+                    setScanValue(event.key)
+                } else {
+                    setScanValue((prev) => `${prev}${event.key}`)
+                }
+            } else if (event.key === "Enter" && isScanOpen) {
+                event.preventDefault()
+                void submitScan(scanValue)
+            }
+        }
+
+        window.addEventListener("keydown", handleKeydown)
+        return () => {
+            window.removeEventListener("keydown", handleKeydown)
+        }
+    }, [isScanOpen, scanValue, searchMode, selectedBook, submitScan])
+
+    const extraEntries =
+        selectedBook?.extra && Object.keys(selectedBook.extra).length > 0
+            ? Object.entries(selectedBook.extra)
+            : []
+
     return (
         <div className="app-shell">
             <header className="hero">
@@ -145,13 +349,29 @@ export function BookList() {
                     </p>
                 </div>
                 <div className="hero-actions">
-                    <SearchBar onSearch={handleSearch} isLoading={isLoading} />
+                    <SearchBar
+                        onSearch={handleSearch}
+                        maxLength={MAX_QUERY_LENGTH}
+                        onLimitExceeded={(limit) =>
+                            setError(
+                                `Превышена допустимая длина запроса (${limit} символов).`
+                            )
+                        }
+                        isLoading={isLoading}
+                    />
                     <button
                         className="primary-button"
                         type="button"
                         onClick={handleOpenAdd}
                     >
                         Добавить книгу
+                    </button>
+                    <button
+                        className="ghost-button"
+                        type="button"
+                        onClick={handleOpenScan}
+                    >
+                        Поиск по штрихкоду
                     </button>
                 </div>
             </header>
@@ -164,7 +384,12 @@ export function BookList() {
                     </div>
                     {detailsQuery && (
                         <span className="query-chip">
-                            Поиск: "{detailsQuery}"
+                            Поиск: "{truncateLabel(detailsQuery, MAX_QUERY_LABEL)}"
+                        </span>
+                    )}
+                    {!detailsQuery && scanHighlight && (
+                        <span className="query-chip">
+                            Штрихкод: "{truncateLabel(scanHighlight, MAX_QUERY_LABEL)}"
                         </span>
                     )}
                 </div>
@@ -221,13 +446,25 @@ export function BookList() {
                                 <p className="modal-eyebrow">Карточка книги</p>
                                 <h3>{highlightText(selectedBook.title, detailsQuery)}</h3>
                             </div>
-                            <button
-                                className="ghost-button"
-                                type="button"
-                                onClick={() => setSelectedBook(null)}
-                            >
-                                Закрыть
-                            </button>
+                            <div className="modal-inline-actions">
+                                {searchMode === "barcode" && (
+                                    <button
+                                        className="ghost-button"
+                                        type="button"
+                                        disabled
+                                        title="Редактирование недоступно без API обновления"
+                                    >
+                                        Изменить
+                                    </button>
+                                )}
+                                <button
+                                    className="ghost-button"
+                                    type="button"
+                                    onClick={() => setSelectedBook(null)}
+                                >
+                                    Закрыть
+                                </button>
+                            </div>
                         </header>
                         <div className="modal-body">
                             <div className="detail-row">
@@ -236,7 +473,15 @@ export function BookList() {
                             </div>
                             <div className="detail-row">
                                 <span>Штрихкод</span>
-                                <strong>{renderValue(selectedBook.barcode)}</strong>
+                                <strong>{renderBarcodeValue(selectedBook.barcode)}</strong>
+                            </div>
+                            <div className="detail-row">
+                                <span>Заводской штрихкод</span>
+                                <strong>
+                                    {renderBarcodeValue(
+                                        selectedBook.factory_barcode
+                                    )}
+                                </strong>
                             </div>
                             <div className="detail-row">
                                 <span>Издательство</span>
@@ -250,6 +495,17 @@ export function BookList() {
                                 <span>Место хранения</span>
                                 <strong>{renderValue(selectedBook.location)}</strong>
                             </div>
+                            {extraEntries.length > 0 && (
+                                <div className="extra-block">
+                                    <p className="extra-title">Дополнительные поля</p>
+                                    {extraEntries.map(([key, value]) => (
+                                        <div className="detail-row" key={key}>
+                                            <span>{key}</span>
+                                            <strong>{renderExtraValue(value)}</strong>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -266,21 +522,32 @@ export function BookList() {
                         }
                     }}
                 >
-                    <div className="modal-card">
-                        <header className="modal-header">
-                            <div>
-                                <p className="modal-eyebrow">Новая книга</p>
-                                <h3>Добавить запись</h3>
-                            </div>
-                            <button
-                                className="ghost-button"
-                                type="button"
-                                onClick={() => setIsAddOpen(false)}
-                            >
-                                Закрыть
-                            </button>
-                        </header>
-                        <form className="modal-body" onSubmit={handleAddSubmit}>
+            <div className="modal-card">
+                <header className="modal-header">
+                    <div>
+                        <p className="modal-eyebrow">Новая книга</p>
+                        <h3>Добавить запись</h3>
+                    </div>
+                    <button
+                        className="ghost-button"
+                        type="button"
+                        onClick={() => setIsAddOpen(false)}
+                    >
+                        Закрыть
+                    </button>
+                </header>
+                <form
+                    className="modal-body"
+                    onSubmit={(event) => event.preventDefault()}
+                    onKeyDown={(event) => {
+                        if (
+                            event.key === "Enter" &&
+                            (event.target as HTMLElement).tagName !== "TEXTAREA"
+                        ) {
+                            event.preventDefault()
+                        }
+                    }}
+                >
                             <label className="field">
                                 Название
                                 <input
@@ -308,16 +575,16 @@ export function BookList() {
                                 />
                             </label>
                             <label className="field">
-                                Штрихкод
+                                Заводской штрихкод
                                 <input
-                                    value={draft.barcode}
+                                    inputMode="numeric"
+                                    value={draft.factoryBarcode}
                                     onChange={(event) =>
                                         setDraft((prev) => ({
                                             ...prev,
-                                            barcode: event.target.value,
+                                            factoryBarcode: event.target.value,
                                         }))
                                     }
-                                    required
                                 />
                             </label>
                             <label className="field">
@@ -358,14 +625,157 @@ export function BookList() {
                                     }
                                 />
                             </label>
+                            <div className="extra-fields">
+                                <div className="extra-header">
+                                    <span>Дополнительные поля</span>
+                                    <button
+                                        className="ghost-button"
+                                        type="button"
+                                        onClick={() =>
+                                            setDraft((prev) => ({
+                                                ...prev,
+                                                extra: [
+                                                    ...prev.extra,
+                                                    {
+                                                        id: createExtraId(),
+                                                        key: "",
+                                                        value: "",
+                                                    },
+                                                ],
+                                            }))
+                                        }
+                                    >
+                                        Добавить поле
+                                    </button>
+                                </div>
+                                {draft.extra.map((field, index) => (
+                                    <div className="extra-row" key={field.id}>
+                                        <input
+                                            className="extra-input"
+                                            placeholder="Название"
+                                            value={field.key}
+                                            onChange={(event) =>
+                                                setDraft((prev) => {
+                                                    const next = [...prev.extra]
+                                                    next[index] = {
+                                                        ...next[index],
+                                                        key: event.target.value,
+                                                    }
+                                                    return {...prev, extra: next}
+                                                })
+                                            }
+                                        />
+                                        <textarea
+                                            className="extra-input extra-textarea"
+                                            placeholder="Значение"
+                                            value={field.value}
+                                            onChange={(event) =>
+                                                setDraft((prev) => {
+                                                    const next = [...prev.extra]
+                                                    next[index] = {
+                                                        ...next[index],
+                                                        value: event.target.value,
+                                                    }
+                                                    return {...prev, extra: next}
+                                                })
+                                            }
+                                        />
+                                        <button
+                                            className="ghost-button"
+                                            type="button"
+                                            onClick={() =>
+                                                setDraft((prev) => ({
+                                                    ...prev,
+                                                    extra: prev.extra.filter(
+                                                        (_, itemIndex) =>
+                                                            itemIndex !== index
+                                                    ),
+                                                }))
+                                            }
+                                            disabled={draft.extra.length === 1}
+                                        >
+                                            Удалить
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                            {addError && <p className="error-banner">{addError}</p>}
                             <div className="modal-actions">
-                                <button className="primary-button" type="submit">
+                                <button
+                                    className="primary-button"
+                                    type="button"
+                                    disabled={isAddSaving}
+                                    onClick={() => {
+                                        void handleAddSubmit()
+                                    }}
+                                >
                                     Сохранить
                                 </button>
                                 <button
                                     className="ghost-button"
                                     type="button"
                                     onClick={() => setIsAddOpen(false)}
+                                >
+                                    Отмена
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {isScanOpen && (
+                <div
+                    className="modal-backdrop"
+                    role="dialog"
+                    aria-modal="true"
+                    onClick={(event) => {
+                        if (event.target === event.currentTarget) {
+                            setIsScanOpen(false)
+                        }
+                    }}
+                >
+                    <div className="modal-card">
+                        <header className="modal-header">
+                            <div>
+                                <p className="modal-eyebrow">Сканирование</p>
+                                <h3>Поиск по штрихкоду</h3>
+                            </div>
+                            <button
+                                className="ghost-button"
+                                type="button"
+                                onClick={() => setIsScanOpen(false)}
+                            >
+                                Закрыть
+                            </button>
+                        </header>
+                        <form className="modal-body" onSubmit={handleScanSubmit}>
+                            <label className="field">
+                                Штрихкод
+                                <input
+                                    ref={scanInputRef}
+                                    inputMode="numeric"
+                                    value={scanValue}
+                                    onChange={(event) =>
+                                        setScanValue(event.target.value)
+                                    }
+                                />
+                            </label>
+                            {scanMessage && (
+                                <p className="status-line">{scanMessage}</p>
+                            )}
+                            <div className="modal-actions">
+                                <button
+                                    className="primary-button"
+                                    type="submit"
+                                    disabled={isScanLoading}
+                                >
+                                    Найти
+                                </button>
+                                <button
+                                    className="ghost-button"
+                                    type="button"
+                                    onClick={() => setIsScanOpen(false)}
                                 >
                                     Отмена
                                 </button>

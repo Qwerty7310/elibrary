@@ -151,6 +151,10 @@
   border-radius: 999px;
   background: rgba(69, 54, 40, 0.12);
   color: #3f3123;
+  max-width: min(320px, 70vw);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .error-banner {
@@ -264,6 +268,13 @@
   margin-bottom: 18px;
 }
 
+.modal-inline-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
 .modal-header h3 {
   margin: 8px 0 0;
   font-size: 1.5rem;
@@ -316,6 +327,56 @@
   gap: 12px;
   justify-content: flex-end;
   margin-top: 8px;
+}
+
+.extra-fields {
+  display: grid;
+  gap: 12px;
+}
+
+.extra-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.9rem;
+  color: rgba(53, 41, 29, 0.75);
+}
+
+.extra-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.extra-input {
+  border-radius: 10px;
+  border: 1px solid rgba(112, 90, 70, 0.25);
+  padding: 8px 10px;
+  background: #fff;
+  font-size: 0.95rem;
+  font-family: inherit;
+}
+
+.extra-textarea {
+  min-height: 38px;
+  height: 38px;
+  resize: vertical;
+}
+
+.extra-block {
+  display: grid;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.extra-title {
+  margin: 0;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: rgba(53, 41, 29, 0.6);
 }
 
 @keyframes float-in {
@@ -375,5 +436,9 @@
   .modal-header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .extra-row {
+    grid-template-columns: 1fr;
   }
 }
