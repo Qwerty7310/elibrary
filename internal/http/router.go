@@ -6,12 +6,15 @@ import (
 	"elibrary/internal/repository/postgres"
 	"elibrary/internal/service"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/go-chi/cors"
+
+	httpMiddleware "elibrary/internal/http/middleware"
 )
 
 const (
@@ -42,6 +45,18 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
+	userRepo := postgres.NewUserRepository(db)
+
+	jwtManager := &service.JWTManager{
+		Secret: []byte(cfg.JWTSecret),
+		TTL:    24 * time.Hour,
+	}
+
+	authService := service.NewAuthService(userRepo, jwtManager)
+	authHandler := &handler.AuthHandler{
+		Service: authService,
+	}
+
 	bookRepo := postgres.NewBookRepository(db)
 	sequenceRepo := postgres.NewSequenceRepository(db)
 
@@ -60,7 +75,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	r.Get("/health", handler.Health)
 	r.Get("/scan/{value}", scanHandler.Scan)
 
+	r.Post("/auth/login", authHandler.Login)
+
 	r.Route("/books", func(r chi.Router) {
+		r.Use(httpMiddleware.Auth(jwtManager))
+
 		r.Post("/", bookHandler.Create)
 		r.Get("/search", bookHandler.Search)
 

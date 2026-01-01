@@ -12,12 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-var (
-	ErrNotFound       = errors.New("book not found")
-	ErrInvalidBarcode = errors.New("invalid barcode")
-	ErrBarcodeExists  = errors.New("barcode already exists")
-)
-
 type BookService struct {
 	bookRepo   repository.BookRepository
 	barcodeSvc *BarcodeService
@@ -30,7 +24,7 @@ func NewBookService(repo repository.BookRepository, barcodeSvc *BarcodeService) 
 	}
 }
 
-func (s *BookService) CreateBook(ctx context.Context, book domain.Book) (*domain.Book, []byte, error) {
+func (s *BookService) Create(ctx context.Context, book domain.Book) (*domain.Book, []byte, error) {
 	ean13, err := s.barcodeSvc.GenerateEAN13(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to generate barcode: %w", err)
@@ -56,7 +50,7 @@ func (s *BookService) CreateBook(ctx context.Context, book domain.Book) (*domain
 	if err := s.bookRepo.Create(ctx, book); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "duplicate") ||
 			strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return nil, nil, ErrBarcodeExists
+			return nil, nil, domain.ErrBarcodeExists
 		}
 		return nil, nil, fmt.Errorf("failed to save book: %w", err)
 	}
@@ -74,7 +68,7 @@ func (s *BookService) GetByID(ctx context.Context, id uuid.UUID) (*domain.Book, 
 	book, err := s.bookRepo.GetByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return nil, ErrNotFound
+			return nil, domain.ErrNotFound
 		}
 
 		return nil, err
@@ -84,26 +78,26 @@ func (s *BookService) GetByID(ctx context.Context, id uuid.UUID) (*domain.Book, 
 
 func (s *BookService) GetByBarcode(ctx context.Context, barcode string) (*domain.Book, error) {
 	if !s.barcodeSvc.ValidateEAN13(barcode) {
-		return nil, ErrInvalidBarcode
+		return nil, domain.ErrInvalidBarcode
 	}
 
 	book, err := s.bookRepo.GetByBarcode(ctx, barcode)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return nil, ErrNotFound
+			return nil, domain.ErrNotFound
 		}
 		return nil, err
 	}
-	return &book, nil
+	return book, nil
 }
 
-func (s *BookService) GetByFactoryBarcode(ctx context.Context, factoryBarcode string) ([]domain.Book, error) {
+func (s *BookService) GetByFactoryBarcode(ctx context.Context, factoryBarcode string) ([]*domain.Book, error) {
 	if factoryBarcode == "" {
 		return nil, errors.New("factory barcode cannot be empty")
 	}
 
 	if !s.barcodeSvc.ValidateEAN13(factoryBarcode) {
-		return nil, ErrInvalidBarcode
+		return nil, domain.ErrInvalidBarcode
 	}
 
 	return s.bookRepo.GetByFactoryBarcode(ctx, factoryBarcode)
@@ -112,14 +106,14 @@ func (s *BookService) GetByFactoryBarcode(ctx context.Context, factoryBarcode st
 func (s *BookService) FindByScan(ctx context.Context, value string) ([]domain.Book, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return nil, ErrInvalidBarcode
+		return nil, domain.ErrInvalidBarcode
 	}
 
 	// Поиск по нашему EAN-13
 	if s.barcodeSvc.ValidateEAN13(value) {
 		book, err := s.bookRepo.GetByBarcode(ctx, value)
 		if err == nil {
-			return []domain.Book{book}, nil
+			return []domain.Book{*book}, nil
 		}
 		if !errors.Is(err, repository.ErrNotFound) {
 			return nil, err
@@ -131,7 +125,7 @@ func (s *BookService) FindByScan(ctx context.Context, value string) ([]domain.Bo
 		id, _ := uuid.Parse(value)
 		book, err := s.bookRepo.GetByID(ctx, id)
 		if err == nil {
-			return []domain.Book{book}, nil
+			return []domain.Book{*book}, nil
 		}
 		if !errors.Is(err, repository.ErrNotFound) {
 			return nil, err
@@ -140,11 +134,11 @@ func (s *BookService) FindByScan(ctx context.Context, value string) ([]domain.Bo
 
 	books, err := s.bookRepo.GetByFactoryBarcode(ctx, value)
 	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, domain.ErrNotFound
+		}
+		log.Printf("Warning: failed to find books: %v\n", err)
 		return nil, err
-	}
-
-	if len(books) == 0 {
-		return nil, ErrNotFound
 	}
 
 	return books, nil
@@ -167,11 +161,11 @@ type UpdateBookRequest struct {
 	Extra          map[string]any `json:"extra,omitempty"`
 }
 
-func (s *BookService) UpdateBook(ctx context.Context, id uuid.UUID, updates UpdateBookRequest) error {
+func (s *BookService) Update(ctx context.Context, id uuid.UUID, updates UpdateBookRequest) error {
 	book, err := s.bookRepo.GetByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return ErrNotFound
+			return domain.ErrNotFound
 		}
 		return err
 	}

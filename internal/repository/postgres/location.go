@@ -94,6 +94,7 @@ func (r *LocationRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, repository.ErrNotFound
 		}
+		return nil, err
 	}
 
 	return &location, nil

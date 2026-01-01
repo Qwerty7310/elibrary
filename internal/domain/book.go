@@ -11,18 +11,17 @@ type Book struct {
 	Barcode        string         `json:"barcode"`
 	FactoryBarcode string         `json:"factory_barcode,omitempty"`
 	Title          string         `json:"title"`
-	Author         string         `json:"author"`
-	Publisher      string         `json:"publisher"`
+	Publisher      *Publisher     `json:"publisher,omitempty"`
 	Year           int            `json:"year"`
-	Location       string         `json:"location"`
-	Extra          map[string]any `json:"extra"`
-	CreatedAt      time.Time      `json:"created_at,omitempty"`
-	UpdatedAt      time.Time      `json:"updated_at,omitempty"`
+	Description    string         `json:"description,omitempty"`
+	Content        []Work         `json:"content"`
+	Location       *Location      `json:"location,omitempty"`
+	Extra          map[string]any `json:"extra,omitempty"`
+	CreatedAt      time.Time      `json:"created_at"`
+	UpdatedAt      time.Time      `json:"updated_at"`
 }
 
-func NewBook() Book {
-	return Book{
-		ID:    uuid.New(),
-		Extra: make(map[string]any),
-	}
+type Work struct {
+	Title   string   `json:"title"`
+	Authors []Author `json:"authors,omitempty"`
 }

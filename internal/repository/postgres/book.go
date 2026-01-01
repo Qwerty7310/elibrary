@@ -60,7 +60,7 @@ func (r *BookRepository) Update(ctx context.Context, book domain.Book) error {
 		return err
 	}
 
-	result, err := r.db.Exec(ctx, `
+	res, err := r.db.Exec(ctx, `
 		UPDATE books
 		SET
 		    title = $2,
@@ -87,14 +87,14 @@ func (r *BookRepository) Update(ctx context.Context, book domain.Book) error {
 		return err
 	}
 
-	if result.RowsAffected() == 0 {
+	if res.RowsAffected() == 0 {
 		return repository.ErrNotFound
 	}
 
 	return nil
 }
 
-func (r *BookRepository) GetByID(ctx context.Context, id uuid.UUID) (domain.Book, error) {
+func (r *BookRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Book, error) {
 	var book domain.Book
 	var extraJSON []byte
 	var factoryBarcode sql.NullString
@@ -146,7 +146,7 @@ func (r *BookRepository) GetByID(ctx context.Context, id uuid.UUID) (domain.Book
 	return book, nil
 }
 
-func (r *BookRepository) GetByBarcode(ctx context.Context, barcode string) (domain.Book, error) {
+func (r *BookRepository) GetByBarcode(ctx context.Context, barcode string) (*domain.Book, error) {
 	var book domain.Book
 	var extraJSON []byte
 	var factoryBarcode sql.NullString
@@ -171,9 +171,9 @@ func (r *BookRepository) GetByBarcode(ctx context.Context, barcode string) (doma
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return domain.Book{}, repository.ErrNotFound
+			return nil, repository.ErrNotFound
 		}
-		return domain.Book{}, err
+		return nil, err
 	}
 
 	if factoryBarcode.Valid {
@@ -196,7 +196,7 @@ func (r *BookRepository) GetByBarcode(ctx context.Context, barcode string) (doma
 	return book, nil
 }
 
-func (r *BookRepository) GetByFactoryBarcode(ctx context.Context, factoryBarcode string) ([]domain.Book, error) {
+func (r *BookRepository) GetByFactoryBarcode(ctx context.Context, factoryBarcode string) ([]*domain.Book, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT id, barcode, factory_barcode, title, author, publisher, year, location, extra
 		FROM books
@@ -208,7 +208,7 @@ func (r *BookRepository) GetByFactoryBarcode(ctx context.Context, factoryBarcode
 	}
 	defer rows.Close()
 
-	var books []domain.Book
+	var books []*domain.Book
 	for rows.Next() {
 		var book domain.Book
 		var extraJSON []byte
@@ -248,13 +248,21 @@ func (r *BookRepository) GetByFactoryBarcode(ctx context.Context, factoryBarcode
 			return nil, err
 		}
 
-		books = append(books, book)
+		books = append(books, &book)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if len(books) == 0 {
+		return nil, repository.ErrNotFound
 	}
 
 	return books, nil
 }
 
-func (r *BookRepository) Search(ctx context.Context, query string) ([]domain.Book, error) {
+func (r *BookRepository) Search(ctx context.Context, query string) ([]*domain.Book, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT id, barcode, factory_barcode, title, author, publisher, year, location, extra
 		FROM books

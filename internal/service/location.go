@@ -121,6 +121,7 @@ func (s *LocationService) GetByID(ctx context.Context, id uuid.UUID) (*domain.Lo
 		}
 		return nil, err
 	}
+
 	return location, nil
 }
 

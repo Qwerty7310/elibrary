@@ -7,15 +7,19 @@ import (
 )
 
 type Config struct {
-	HTTPAddr          string
-	DBURL             string
+	HTTPAddr           string
+	DBURL              string
 	CORSAllowedOrigins []string
+
+	JWTSecret string
 }
 
 func Load() *Config {
 	cfg := &Config{
-		HTTPAddr: getEnv("HTTP_ADDR", ":8080"),
-		DBURL:    os.Getenv("DB_URL"),
+		HTTPAddr:  getEnv("HTTP_ADDR", ":8080"),
+		DBURL:     os.Getenv("DB_URL"),
+		JWTSecret: getEnv("JWT_SECRET", "dev-secret"),
+
 		CORSAllowedOrigins: parseCSVEnv(
 			"CORS_ALLOWED_ORIGINS",
 			[]string{"http://localhost:5173", "http://localhost:3000"},
