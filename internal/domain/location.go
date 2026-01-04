@@ -35,14 +35,13 @@ func (t LocationType) IsChildOf(parent LocationType) bool {
 }
 
 type Location struct {
-	ID       uuid.UUID    `json:"id"`
-	ParentID *uuid.UUID   `json:"parent_id,omitempty"`
-	Type     LocationType `json:"type"`
-	Name     string       `json:"name"`
-
-	Barcode     string  `json:"barcode"`
-	Address     *string `json:"address,omitempty"`
-	Description *string `json:"description,omitempty"`
+	ID          uuid.UUID    `json:"id"`
+	ParentID    *uuid.UUID   `json:"parent_id,omitempty"`
+	Type        LocationType `json:"type"`
+	Name        string       `json:"name"`
+	Barcode     string       `json:"barcode"`
+	Address     *string      `json:"address,omitempty"`
+	Description *string      `json:"description,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

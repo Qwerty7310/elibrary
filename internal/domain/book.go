@@ -7,21 +7,18 @@ import (
 )
 
 type Book struct {
-	ID             uuid.UUID      `json:"id"`
-	Barcode        string         `json:"barcode"`
-	FactoryBarcode string         `json:"factory_barcode,omitempty"`
-	Title          string         `json:"title"`
-	Publisher      *Publisher     `json:"publisher,omitempty"`
-	Year           int            `json:"year"`
-	Description    string         `json:"description,omitempty"`
-	Content        []Work         `json:"content"`
-	Location       *Location      `json:"location,omitempty"`
-	Extra          map[string]any `json:"extra,omitempty"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
-}
+	ID             uuid.UUID `json:"id"`
+	Title          string    `json:"title"`
+	Barcode        string    `json:"barcode"`
+	FactoryBarcode *string   `json:"factory_barcode,omitempty"`
 
-type Work struct {
-	Title   string   `json:"title"`
-	Authors []Author `json:"authors,omitempty"`
+	PublisherID *uuid.UUID `json:"publisher_id,omitempty"`
+	LocationID  *uuid.UUID `json:"location_id,omitempty"`
+	Year        *int       `json:"year,omitempty"`
+	Description *string    `json:"description,omitempty"`
+
+	Extra map[string]any `json:"extra,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
