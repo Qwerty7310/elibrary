@@ -47,7 +47,7 @@ func (r *BookRepository) Create(ctx context.Context, book domain.Book) error {
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return errors.New("barcode already exists")
+			return repository.ErrBarcodeExists
 		}
 		return err
 	}
@@ -798,4 +798,20 @@ func loadLocationsForBooks(ctx context.Context, tx pgx.Tx, books []*bookBase) er
 	}
 
 	return rows.Err()
+}
+
+func (r *BookRepository) WithTx(ctx context.Context, fn func(tx repository.BookTx) error) error {
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	wrapped := &bookTx{tx: tx}
+
+	if err := fn(wrapped); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
 }

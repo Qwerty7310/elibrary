@@ -3,207 +3,187 @@ package service
 import (
 	"context"
 	"elibrary/internal/domain"
+	"elibrary/internal/readmodel"
 	"elibrary/internal/repository"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/google/uuid"
 )
 
 type BookService struct {
-	bookRepo   repository.BookRepository
-	barcodeSvc *BarcodeService
+	bookRepo        repository.BookRepository
+	bookWorksRepo   repository.BookWorksRepository
+	workRepo        repository.WorkRepository
+	workAuthorsRepo repository.WorkAuthorsRepository
+	barcodeSvc      *BarcodeService
 }
 
-func NewBookService(repo repository.BookRepository, barcodeSvc *BarcodeService) *BookService {
+func NewBookService(
+	bookRepo repository.BookRepository,
+	bookWorksRepo repository.BookWorksRepository,
+	workRepo repository.WorkRepository,
+	workAuthorsRepo repository.WorkAuthorsRepository,
+	barcodeSvc *BarcodeService,
+) *BookService {
 	return &BookService{
-		bookRepo:   repo,
-		barcodeSvc: barcodeSvc,
+		bookRepo:        bookRepo,
+		bookWorksRepo:   bookWorksRepo,
+		workRepo:        workRepo,
+		workAuthorsRepo: workAuthorsRepo,
+		barcodeSvc:      barcodeSvc,
 	}
 }
 
-func (s *BookService) Create(ctx context.Context, book domain.Book) (*domain.Book, []byte, error) {
+func (s *BookService) Create(ctx context.Context, book domain.Book, works []repository.BookWorkInput) (*domain.Book, error) {
+	if strings.TrimSpace(book.Title) == "" {
+		return nil, errors.New("title is required")
+	}
+
 	ean13, err := s.barcodeSvc.GenerateEAN13(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to generate barcode: %w", err)
+		return nil, fmt.Errorf("failed to generate barcode: %w", err)
 	}
 
+	book.ID = uuid.New()
 	book.Barcode = ean13
-
-	if book.ID == uuid.Nil {
-		book.ID = uuid.New()
-	}
 
 	if book.Extra == nil {
 		book.Extra = make(map[string]any)
 	}
 
-	if strings.TrimSpace(book.Title) == "" {
-		return nil, nil, errors.New("title is required")
-	}
-	if strings.TrimSpace(book.Author) == "" {
-		return nil, nil, errors.New("author is required")
-	}
-
-	if err := s.bookRepo.Create(ctx, book); err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "duplicate") ||
-			strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return nil, nil, domain.ErrBarcodeExists
+	for _, w := range works {
+		if _, err := s.workRepo.GetByID(ctx, w.WorkID); err != nil {
+			return nil, err
 		}
-		return nil, nil, fmt.Errorf("failed to save book: %w", err)
 	}
 
-	barcodeImage, err := s.barcodeSvc.GenerateBarcodeImage(ean13)
-	if err != nil {
-		log.Printf("Warning: failed to generate barcode image: %v\n", err)
-		barcodeImage = nil
-	}
-
-	return &book, barcodeImage, nil
-}
-
-func (s *BookService) GetByID(ctx context.Context, id uuid.UUID) (*domain.Book, error) {
-	book, err := s.bookRepo.GetByID(ctx, id)
-	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			return nil, domain.ErrNotFound
+	err = s.bookRepo.WithTx(ctx, func(tx repository.BookTx) error {
+		if err := tx.CreateBook(ctx, book); err != nil {
+			return err
 		}
+		return tx.ReplaceBookWorks(ctx, book.ID, works)
+	})
 
-		return nil, err
-	}
 	return &book, nil
 }
 
-func (s *BookService) GetByBarcode(ctx context.Context, barcode string) (*domain.Book, error) {
-	if !s.barcodeSvc.ValidateEAN13(barcode) {
-		return nil, domain.ErrInvalidBarcode
-	}
+type UpdateBookRequest struct {
+	FactoryBarcode *string        `json:"factory_barcode,omitempty"`
+	Title          *string        `json:"title,omitempty"`
+	PublisherID    *uuid.UUID     `json:"publisher_id,omitempty"`
+	Year           *int           `json:"year,omitempty"`
+	Description    *string        `json:"description,omitempty"`
+	LocationID     *uuid.UUID     `json:"location_id,omitempty"`
+	Extra          map[string]any `json:"extra,omitempty"`
 
-	book, err := s.bookRepo.GetByBarcode(ctx, barcode)
+	Works *[]repository.BookWorkInput `json:"works,omitempty"`
+}
+
+func (s *BookService) Update(ctx context.Context, id uuid.UUID, updates UpdateBookRequest) error {
+	return s.bookRepo.WithTx(ctx, func(tx repository.BookTx) error {
+
+		book, err := tx.GetDomainByID(ctx, id)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				return domain.ErrNotFound
+			}
+			return err
+		}
+
+		if updates.FactoryBarcode != nil {
+			book.FactoryBarcode = updates.FactoryBarcode
+		}
+		if updates.Title != nil {
+			title := strings.TrimSpace(*updates.Title)
+			if title == "" {
+				return errors.New("title cannot be empty")
+			}
+			book.Title = title
+		}
+		if updates.PublisherID != nil {
+			book.PublisherID = updates.PublisherID
+		}
+		if updates.Year != nil {
+			book.Year = updates.Year
+		}
+		if updates.Description != nil {
+			book.Description = updates.Description
+		}
+		if updates.LocationID != nil {
+			book.LocationID = updates.LocationID
+		}
+		if updates.Extra != nil {
+			book.Extra = updates.Extra
+		}
+
+		if err := tx.UpdateBook(ctx, *book); err != nil {
+			return err
+		}
+
+		if updates.Works != nil {
+			if err := tx.ReplaceBookWorks(ctx, book.ID, *updates.Works); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+}
+
+func (s *BookService) GetPublicByID(ctx context.Context, id uuid.UUID) (*readmodel.BookPublic, error) {
+	book, err := s.bookRepo.GetPublicByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil, domain.ErrNotFound
 		}
+
 		return nil, err
 	}
 	return book, nil
 }
 
-func (s *BookService) GetByFactoryBarcode(ctx context.Context, factoryBarcode string) ([]*domain.Book, error) {
-	if factoryBarcode == "" {
-		return nil, errors.New("factory barcode cannot be empty")
-	}
+func (s *BookService) GetInternalByID(ctx context.Context, id uuid.UUID) (*readmodel.BookInternal, error) {
+	//if !auth.HasRole(ctx, auth.RoleAdmin) {
+	//	return nil, domain.ErrForbidden
+	//}
 
-	if !s.barcodeSvc.ValidateEAN13(factoryBarcode) {
-		return nil, domain.ErrInvalidBarcode
-	}
-
-	return s.bookRepo.GetByFactoryBarcode(ctx, factoryBarcode)
-}
-
-func (s *BookService) FindByScan(ctx context.Context, value string) ([]domain.Book, error) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return nil, domain.ErrInvalidBarcode
-	}
-
-	// Поиск по нашему EAN-13
-	if s.barcodeSvc.ValidateEAN13(value) {
-		book, err := s.bookRepo.GetByBarcode(ctx, value)
-		if err == nil {
-			return []domain.Book{*book}, nil
-		}
-		if !errors.Is(err, repository.ErrNotFound) {
-			return nil, err
-		}
-	}
-
-	// Поиск по UUID
-	if isValidUUID(value) {
-		id, _ := uuid.Parse(value)
-		book, err := s.bookRepo.GetByID(ctx, id)
-		if err == nil {
-			return []domain.Book{*book}, nil
-		}
-		if !errors.Is(err, repository.ErrNotFound) {
-			return nil, err
-		}
-	}
-
-	books, err := s.bookRepo.GetByFactoryBarcode(ctx, value)
+	book, err := s.bookRepo.GetInternalByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil, domain.ErrNotFound
 		}
-		log.Printf("Warning: failed to find books: %v\n", err)
+
+		return nil, err
+	}
+	return book, nil
+}
+
+func (s *BookService) GetPublic(ctx context.Context, filter repository.BookFilter) ([]*readmodel.BookPublic, error) {
+	books, err := s.bookRepo.GetPublic(ctx, filter)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, domain.ErrNotFound
+		}
 		return nil, err
 	}
 
 	return books, nil
 }
 
-func (s *BookService) Search(ctx context.Context, query string) ([]domain.Book, error) {
-	if query == "" {
-		return nil, nil
-	}
-	return s.bookRepo.Search(ctx, query)
-}
+func (s *BookService) GetInternal(ctx context.Context, filter repository.BookFilter) ([]*readmodel.BookInternal, error) {
+	//if !auth.HasRole(ctx, auth.RoleAdmin) {
+	//	return nil, domain.ErrForbidden
+	//}
 
-type UpdateBookRequest struct {
-	Title          *string        `json:"title,omitempty"`
-	Author         *string        `json:"author,omitempty"`
-	Publisher      *string        `json:"publisher,omitempty"`
-	Year           *int           `json:"year,omitempty"`
-	Location       *string        `json:"location,omitempty"`
-	FactoryBarcode *string        `json:"factory_barcode,omitempty"`
-	Extra          map[string]any `json:"extra,omitempty"`
-}
-
-func (s *BookService) Update(ctx context.Context, id uuid.UUID, updates UpdateBookRequest) error {
-	book, err := s.bookRepo.GetByID(ctx, id)
+	books, err := s.bookRepo.GetInternal(ctx, filter)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return domain.ErrNotFound
+			return nil, domain.ErrNotFound
 		}
-		return err
+		return nil, err
 	}
 
-	if updates.Title != nil {
-		if title := strings.TrimSpace(*updates.Title); title != "" {
-			book.Title = title
-		}
-	}
-	if updates.Author != nil {
-		if author := strings.TrimSpace(*updates.Author); author != "" {
-			book.Author = author
-		}
-	}
-	if updates.Publisher != nil {
-		book.Publisher = *updates.Publisher
-	}
-	if updates.Year != nil {
-		book.Year = *updates.Year
-	}
-	if updates.Location != nil {
-		book.Location = *updates.Location
-	}
-	if updates.FactoryBarcode != nil {
-		book.FactoryBarcode = *updates.FactoryBarcode
-	}
-	if updates.Extra != nil {
-		book.Extra = updates.Extra
-	}
-
-	return s.bookRepo.Update(ctx, book)
-}
-
-func (s *BookService) GenerateBarcodeImage(barcode string) ([]byte, error) {
-	return s.barcodeSvc.GenerateBarcodeImage(barcode)
-}
-
-func isValidUUID(s string) bool {
-	_, err := uuid.Parse(s)
-	return err == nil
+	return books, nil
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"elibrary/internal/repository"
+	"errors"
 	"fmt"
 	"image/png"
 	"strconv"
