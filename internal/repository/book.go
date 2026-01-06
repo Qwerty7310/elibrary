@@ -9,11 +9,7 @@ import (
 	"github.com/google/uuid"
 )
 
-var (
-	ErrNotFound       = errors.New("not found")
-	ErrInvalidBarcode = errors.New("invalid barcode")
-	ErrBarcodeExists  = errors.New("barcode already exists")
-)
+var ErrNotFound = errors.New("not found")
 
 type BookRepository interface {
 	Create(ctx context.Context, book domain.Book) error

@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"elibrary/internal/domain"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -14,26 +15,27 @@ func NewSequenceRepository(db *pgxpool.Pool) *SequenceRepository {
 	return &SequenceRepository{db: db}
 }
 
-func (r *SequenceRepository) GetNext(ctx context.Context, prefix int) (int64, error) {
-	var sequence int64
-	err := r.db.QueryRow(ctx, `
-		INSERT INTO barcode_sequences (prefix)
-		VALUES ($1)
-		ON CONFLICT (prefix)
-		DO UPDATE SET last_value = barcode_sequences.last_value + 1
-		RETURNING last_value
-	`, prefix).Scan(&sequence)
+func (r *SequenceRepository) GetNext(ctx context.Context, t domain.BarcodeType) (seq int64, prefix int, err error) {
+	err = r.db.QueryRow(ctx, `
+		UPDATE barcode_sequences
+		SET last_value = last_value + 1
+		WHERE type = $1
+		RETURNING last_value, prefix
+	`, t).Scan(&seq, &prefix)
 
-	return sequence, err
+	return
 }
 
-func (r *SequenceRepository) SetPrefix(ctx context.Context, prefix int, description string) error {
+func (r *SequenceRepository) SetType(ctx context.Context, t domain.BarcodeType, prefix int, description string) error {
 	_, err := r.db.Exec(ctx, `
-		INSERT INTO barcode_sequences (prefix, description)
-		VALUES ($1, $2)
-		ON CONFLICT (prefix)
-		DO UPDATE SET description = EXCLUDED.description
-	`, prefix, description)
+		INSERT INTO barcode_sequences (type, prefix, description)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (type)
+		DO UPDATE SET
+		    prefix = EXCLUDED.prefix,
+		    description = EXCLUDED.description,
+		    updated_at = NOW()
+	`, t, prefix, description)
 
 	return err
 }

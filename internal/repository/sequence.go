@@ -1,8 +1,11 @@
 package repository
 
-import "context"
+import (
+	"context"
+	"elibrary/internal/domain"
+)
 
 type SequenceRepository interface {
-	GetNext(ctx context.Context, prefix int) (int64, error)
-	SetPrefix(ctx context.Context, prefix int, description string) error
+	GetNext(ctx context.Context, t domain.BarcodeType) (int64, int, error)
+	SetType(ctx context.Context, t domain.BarcodeType, prefix int, description string) error
 }

@@ -3,12 +3,11 @@ package service
 import (
 	"bytes"
 	"context"
+	"elibrary/internal/domain"
 	"elibrary/internal/repository"
-	"errors"
 	"fmt"
 	"image/png"
 	"strconv"
-	"sync"
 
 	"github.com/boombuler/barcode"
 	"github.com/boombuler/barcode/ean"
@@ -16,43 +15,25 @@ import (
 
 type BarcodeService struct {
 	seqRepo repository.SequenceRepository
-	mu      sync.Mutex
-	prefix  int
 }
 
-func NewBarcodeService(seqRepo repository.SequenceRepository, prefix int) *BarcodeService {
-	if prefix < 200 || prefix > 299 {
-		prefix = 200
-	}
-
+func NewBarcodeService(seqRepo repository.SequenceRepository) *BarcodeService {
 	return &BarcodeService{
 		seqRepo: seqRepo,
-		prefix:  prefix,
 	}
 }
 
-func (s *BarcodeService) SetPrefix(prefix int) error {
-	if prefix < 200 || prefix > 299 {
-		return fmt.Errorf("prefix must be between 200 and 299 for internal use")
-	}
-	s.prefix = prefix
-	return nil
-}
-
-func (s *BarcodeService) GenerateEAN13(ctx context.Context) (string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	sequence, err := s.seqRepo.GetNext(ctx, s.prefix)
+func (s *BarcodeService) GenerateEAN13(ctx context.Context, t domain.BarcodeType) (string, error) {
+	sequence, prefix, err := s.seqRepo.GetNext(ctx, t)
 	if err != nil {
 		return "", fmt.Errorf("failed to get barcode sequence: %w", err)
 	}
 
 	if sequence > 999999999 {
-		return "", fmt.Errorf("barcode sequence overflow for prefix %d", s.prefix)
+		return "", fmt.Errorf("barcode sequence overflow for prefix %d", prefix)
 	}
 
-	base := fmt.Sprintf("%03d%09d", s.prefix, sequence)
+	base := fmt.Sprintf("%03d%09d", prefix, sequence)
 
 	checkSum := s.calculateEAN13Checksum(base)
 
