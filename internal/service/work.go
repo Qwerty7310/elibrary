@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"elibrary/internal/domain"
+	"elibrary/internal/readmodel"
 	"elibrary/internal/repository"
 	"errors"
 	"log"
@@ -91,4 +92,8 @@ func (s *WorkService) Delete(ctx context.Context, id uuid.UUID) error {
 	}
 
 	return nil
+}
+
+func (s *WorkService) GetAll(ctx context.Context) ([]*readmodel.Work, error) {
+	return s.workRepo.GetAll(ctx)
 }

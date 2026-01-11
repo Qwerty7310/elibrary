@@ -3,9 +3,9 @@ package service
 import (
 	"context"
 	"elibrary/internal/domain"
+	"elibrary/internal/readmodel"
 	"elibrary/internal/repository"
 	"errors"
-	"log"
 	"strings"
 	"time"
 
@@ -28,7 +28,6 @@ func (s *AuthorService) Create(ctx context.Context, author domain.Author) (*doma
 	}
 
 	if err := s.authorRepo.Create(ctx, author); err != nil {
-		log.Printf("Error creating author: %v", err)
 		return nil, err
 	}
 
@@ -100,9 +99,12 @@ func (s *AuthorService) Delete(ctx context.Context, id uuid.UUID) error {
 		if errors.Is(err, repository.ErrNotFound) {
 			return domain.ErrNotFound
 		}
-		log.Printf("Error deleting author: %v", err)
 		return err
 	}
 
 	return nil
+}
+
+func (s *AuthorService) GetAll(ctx context.Context) ([]readmodel.Author, error) {
+	return s.authorRepo.GetAll(ctx)
 }

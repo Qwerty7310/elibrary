@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -31,6 +32,10 @@ func (m *JWTManager) Parse(tokenStr string) (uuid.UUID, error) {
 		return uuid.Nil, err
 	}
 
-	claims := token.Claims.(*jwt.RegisteredClaims)
+	claims, ok := token.Claims.(*jwt.RegisteredClaims)
+	if !ok || !token.Valid {
+		return uuid.Nil, errors.New("invalid token")
+	}
+
 	return uuid.Parse(claims.Subject)
 }

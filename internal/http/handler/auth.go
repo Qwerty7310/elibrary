@@ -25,9 +25,12 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	token, err := h.Service.Login(r.Context(), req.Login, req.Password)
 	if err != nil {
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
+		return
 	}
 
 	json.NewEncoder(w).Encode(map[string]string{
 		"access_token": token,
 	})
+
+	w.Header().Set("Content-Type", "application/json")
 }

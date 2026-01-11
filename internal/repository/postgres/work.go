@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"elibrary/internal/domain"
+	"elibrary/internal/readmodel"
 	"elibrary/internal/repository"
 	"errors"
 
@@ -101,4 +102,75 @@ func (r *WorkRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	}
 
 	return nil
+}
+
+func (r *WorkRepository) GetAll(ctx context.Context) ([]*readmodel.Work, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT
+			w.id,
+			w.title,
+			a.id,
+			a.last_name,
+			a.first_name,
+			a.middle_name
+		FROM works w
+		LEFT JOIN work_authors wa ON wa.work_id = w.id
+		LEFT JOIN authors a ON a.id = wa.author_id
+		ORDER BY w.title, a.last_name, a.first_name
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	workMap := make(map[uuid.UUID]*readmodel.Work)
+	res := make([]*readmodel.Work, 0, 64)
+
+	for rows.Next() {
+		var (
+			workID uuid.UUID
+			title  string
+
+			authorID   *uuid.UUID
+			lastName   *string
+			firstName  *string
+			middleName *string
+		)
+
+		if err := rows.Scan(
+			&workID,
+			&title,
+			&authorID,
+			&lastName,
+			&firstName,
+			&middleName,
+		); err != nil {
+			return nil, err
+		}
+
+		work, ok := workMap[workID]
+		if !ok {
+			work = &readmodel.Work{
+				ID:    workID,
+				Title: title,
+			}
+			workMap[workID] = work
+			res = append(res, work)
+		}
+
+		if authorID != nil {
+			work.Authors = append(work.Authors, readmodel.Author{
+				ID:         *authorID,
+				LastName:   derefStr(lastName),
+				FirstName:  firstName,
+				MiddleName: middleName,
+			})
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return res, nil
 }

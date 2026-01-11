@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"elibrary/internal/domain"
 	"elibrary/internal/repository"
 	"errors"
 
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -30,4 +32,13 @@ func (s *AuthService) Login(ctx context.Context, login, password string) (string
 	}
 
 	return s.jwt.Generate(user.ID)
+}
+
+func (s *AuthService) Me(ctx context.Context, userID uuid.UUID) (*domain.User, error) {
+	user, err := s.users.GetByID(ctx, userID)
+	if err != nil || !user.IsActive {
+		return nil, domain.ErrNotFound
+	}
+
+	return user, nil
 }

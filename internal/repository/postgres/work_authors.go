@@ -40,7 +40,7 @@ func (r *WorkAuthorsRepository) RemoveAuthorFromWork(ctx context.Context, workID
 	return nil
 }
 
-func (r *WorkAuthorsRepository) ReplaceAuthors(ctx context.Context, workID uuid.UUID, authorsIDs []uuid.UUID) error {
+func (r *WorkAuthorsRepository) ReplaceWorkAuthors(ctx context.Context, workID uuid.UUID, authorsIDs []uuid.UUID) error {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return err

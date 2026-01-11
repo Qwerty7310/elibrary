@@ -24,6 +24,7 @@ const (
 func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	r := chi.NewRouter()
 
+	// ---------- CORS ----------
 	allowCredentials := true
 	for _, origin := range cfg.CORSAllowedOrigins {
 		if origin == "*" {
@@ -41,51 +42,81 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 		MaxAge:           300,
 	}))
 
+	// ---------- Base middleware ----------
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
+	// ----------  Repositories ----------
 	userRepo := postgres.NewUserRepository(db)
+	bookRepo := postgres.NewBookRepository(db)
+	authorRepo := postgres.NewAuthorRepository(db)
+	workRepo := postgres.NewWorkRepository(db)
+	bookWorksRepo := postgres.NewBookWorksRepository(db)
+	workAuthorsRepo := postgres.NewWorkAuthorsRepository(db)
+	publisherRepo := postgres.NewPublisherRepository(db)
+	sequenceRepo := postgres.NewSequenceRepository(db)
 
+	// ---------- Services ----------
 	jwtManager := &service.JWTManager{
 		Secret: []byte(cfg.JWTSecret),
 		TTL:    24 * time.Hour,
 	}
 
 	authService := service.NewAuthService(userRepo, jwtManager)
-	authHandler := &handler.AuthHandler{
-		Service: authService,
-	}
+	barcodeService := service.NewBarcodeService(sequenceRepo)
 
-	bookRepo := postgres.NewBookRepository(db)
-	sequenceRepo := postgres.NewSequenceRepository(db)
+	bookService := service.NewBookService(bookRepo, bookWorksRepo, workRepo, workAuthorsRepo, barcodeService)
+	authorService := service.NewAuthorService(authorRepo)
+	workService := service.NewWorkService(workRepo)
+	publisherService := service.NewPublisherService(publisherRepo)
 
-	barcodeService := service.NewBarcodeService(sequenceRepo, prefix)
-	bookService := service.NewBookService(bookRepo, barcodeService)
+	// ---------- Handlers ----------
+	authHandler := &handler.AuthHandler{Service: authService}
+	booksPublicHandler := &handler.BooksPublicHandler{Service: bookService}
+	booksInternalHandler := &handler.BooksInternalHandler{Service: bookService}
+	booksAdminHandler := &handler.BooksAdminHandler{Service: bookService}
 
-	bookHandler := &handler.BookHandler{
-		Service:        bookService,
-		BarcodeService: barcodeService,
-	}
+	authorHandler := handler.NewAuthorHandler(authorService)
+	workHandler := handler.NewWorkHandler(workService)
+	publisherHandler := handler.NewPublisherHandler(publisherService)
 
-	scanHandler := &handler.ScanHandler{
-		BookService: bookService,
-	}
-
+	// ---------- Public routes ----------
 	r.Get("/health", handler.Health)
-	r.Get("/scan/{value}", scanHandler.Scan)
-
 	r.Post("/auth/login", authHandler.Login)
 
-	r.Route("/books", func(r chi.Router) {
+	// ---------- Protected routes ----------
+	r.Route("/", func(r chi.Router) {
 		r.Use(httpMiddleware.Auth(jwtManager))
 
-		r.Post("/", bookHandler.Create)
-		r.Get("/search", bookHandler.Search)
+		// ---------- Books ----------
+		r.Route("/books", func(r chi.Router) {
+			r.Route("/public", func(r chi.Router) {
+				r.Get("/", booksPublicHandler.List)
+				r.Get("/{id}", booksPublicHandler.GetByID)
+			})
 
-		r.Route("/{id}", func(r chi.Router) {
-			r.Get("/", bookHandler.Get)
-			r.Get("/barcode", bookHandler.Barcode)
+			r.Route("/internal", func(r chi.Router) {
+				r.Get("/", booksInternalHandler.List)
+				r.Get("/{id}", booksInternalHandler.GetByID)
+				//r.Get("/{id}/barcode", booksInternalHandler.Barcode)
+			})
+		})
+
+		// ---------- admin ----------
+		r.Route("/admin", func(r chi.Router) {
+			r.Route("/books", func(r chi.Router) {
+				r.Post("/", booksAdminHandler.Create)
+				r.Put("/{id}", booksAdminHandler.Update)
+				r.Delete("/{id}", booksAdminHandler.Delete)
+			})
+		})
+
+		// ---------- reference ----------
+		r.Route("/reference", func(r chi.Router) {
+			r.Get("/authors", authorHandler.GetAll)
+			r.Get("/works", workHandler.GetAll)
+			r.Get("/publishers", publisherHandler.GetAll)
 		})
 	})
 

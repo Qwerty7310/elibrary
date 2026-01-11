@@ -25,6 +25,7 @@ func Auth(jwt *service.JWTManager) func(http.Handler) http.Handler {
 			id, err := jwt.Parse(strings.TrimPrefix(h, "Bearer "))
 			if err != nil {
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
 			}
 
 			ctx := context.WithValue(r.Context(), userIDKey, id)

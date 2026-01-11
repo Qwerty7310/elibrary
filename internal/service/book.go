@@ -41,7 +41,7 @@ func (s *BookService) Create(ctx context.Context, book domain.Book, works []repo
 		return nil, errors.New("title is required")
 	}
 
-	ean13, err := s.barcodeSvc.GenerateEAN13(ctx)
+	ean13, err := s.barcodeSvc.GenerateEAN13(ctx, domain.BarcodeTypeBook)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate barcode: %w", err)
 	}
@@ -145,9 +145,9 @@ func (s *BookService) GetPublicByID(ctx context.Context, id uuid.UUID) (*readmod
 }
 
 func (s *BookService) GetInternalByID(ctx context.Context, id uuid.UUID) (*readmodel.BookInternal, error) {
-	//if !auth.HasRole(ctx, auth.RoleAdmin) {
-	//	return nil, domain.ErrForbidden
-	//}
+	if !auth.HasRole(ctx, auth.RoleAdmin) {
+		return nil, domain.ErrForbidden
+	}
 
 	book, err := s.bookRepo.GetInternalByID(ctx, id)
 	if err != nil {
@@ -173,9 +173,9 @@ func (s *BookService) GetPublic(ctx context.Context, filter repository.BookFilte
 }
 
 func (s *BookService) GetInternal(ctx context.Context, filter repository.BookFilter) ([]*readmodel.BookInternal, error) {
-	//if !auth.HasRole(ctx, auth.RoleAdmin) {
-	//	return nil, domain.ErrForbidden
-	//}
+	if !auth.HasRole(ctx, auth.RoleAdmin) {
+		return nil, domain.ErrForbidden
+	}
 
 	books, err := s.bookRepo.GetInternal(ctx, filter)
 	if err != nil {

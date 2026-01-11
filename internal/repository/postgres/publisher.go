@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"elibrary/internal/domain"
+	"elibrary/internal/readmodel"
 	"elibrary/internal/repository"
 	"errors"
 
@@ -101,4 +102,32 @@ func (r *PublisherRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	}
 
 	return nil
+}
+
+func (r *PublisherRepository) GetAll(ctx context.Context) ([]readmodel.Publisher, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id, name
+		FROM publishers
+		ORDER BY name
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	res := make([]readmodel.Publisher, 0, 32)
+	for rows.Next() {
+		var publisher readmodel.Publisher
+
+		if err := rows.Scan(&publisher.ID, &publisher.Name); err != nil {
+			return nil, err
+		}
+		res = append(res, publisher)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return res, nil
 }

@@ -30,7 +30,7 @@ func NewLocationService(locRepo repository.LocationRepository, barcodeSvc *Barco
 }
 
 func (s *LocationService) Create(ctx context.Context, location domain.Location) (*domain.Location, error) {
-	ean13, err := s.BarcodeSvc.GenerateEAN13(ctx)
+	ean13, err := s.BarcodeSvc.GenerateEAN13(ctx, domain.BarcodeTypeLocation)
 	if err != nil {
 		return nil, err
 	}

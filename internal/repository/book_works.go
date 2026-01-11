@@ -10,7 +10,7 @@ type BookWorksRepository interface {
 	AddWorkToBook(ctx context.Context, bookID uuid.UUID, workID uuid.UUID, position *int) error
 	RemoveWorkFromBook(ctx context.Context, bookID uuid.UUID, workID uuid.UUID) error
 	SetWorkPosition(ctx context.Context, bookID uuid.UUID, workID uuid.UUID, position int) error
-	ReplaceBookWorks(ctx context.Context, bookID uuid.UUID, works []BookWorkInput)
+	ReplaceBookWorks(ctx context.Context, bookID uuid.UUID, works []BookWorkInput) error
 }
 
 type BookWorkInput struct {

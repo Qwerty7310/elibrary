@@ -47,7 +47,7 @@ func (r *BookRepository) Create(ctx context.Context, book domain.Book) error {
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return repository.ErrBarcodeExists
+			return domain.ErrBarcodeExists
 		}
 		return err
 	}
