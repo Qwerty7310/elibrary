@@ -51,6 +51,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	bookWorksRepo := postgres.NewBookWorksRepository(db)
 	workAuthorsRepo := postgres.NewWorkAuthorsRepository(db)
 	publisherRepo := postgres.NewPublisherRepository(db)
+	locationRepo := postgres.NewLocationRepository(db)
 	sequenceRepo := postgres.NewSequenceRepository(db)
 
 	// ---------- Services ----------
@@ -66,16 +67,18 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	authorService := service.NewAuthorService(authorRepo)
 	workService := service.NewWorkService(workRepo)
 	publisherService := service.NewPublisherService(publisherRepo)
+	locationService := service.NewLocationService(locationRepo, barcodeService)
 
 	// ---------- Handlers ----------
-	authHandler := &handler.AuthHandler{Service: authService}
-	bookPublicHandler := &handler.BookPublicHandler{Service: bookService}
-	bookInternalHandler := &handler.BookInternalHandler{Service: bookService}
-	bookAdminHandler := &handler.BookAdminHandler{Service: bookService}
+	authHandler := handler.NewAuthHandler(authService)
+	bookPublicHandler := handler.NewBookPublicHandler(bookService)
+	bookInternalHandler := handler.NewBookInternalHandler(bookService)
+	bookAdminHandler := handler.NewBookAdminHandler(bookService)
 
 	authorHandler := handler.NewAuthorHandler(authorService)
 	workHandler := handler.NewWorkHandler(workService)
 	publisherHandler := handler.NewPublisherHandler(publisherService)
+	locationHandler := handler.NewLocationHandler(locationService)
 
 	// ---------- Public routes ----------
 	r.Get("/health", handler.Health)
@@ -143,6 +146,12 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 				r.Post("/", publisherHandler.Create)
 				r.Put("/{id}", publisherHandler.Update)
 				r.Delete("/{id}", publisherHandler.Delete)
+			})
+
+			r.Route("/locations", func(r chi.Router) {
+				r.Post("/", locationHandler.Create)
+				r.Put("/{id}", locationHandler.Update)
+				r.Delete("/{id}", locationHandler.Delete)
 			})
 		})
 

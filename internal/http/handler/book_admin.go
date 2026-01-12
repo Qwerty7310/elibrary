@@ -18,6 +18,10 @@ type BookAdminHandler struct {
 	Service *service.BookService
 }
 
+func NewBookAdminHandler(service *service.BookService) *BookAdminHandler {
+	return &BookAdminHandler{Service: service}
+}
+
 type createBookRequest struct {
 	Book  domain.Book                `json:"book"`
 	Works []repository.BookWorkInput `json:"works,omitempty"`

@@ -10,6 +10,10 @@ type AuthHandler struct {
 	Service *service.AuthService
 }
 
+func NewAuthHandler(service *service.AuthService) *AuthHandler {
+	return &AuthHandler{Service: service}
+}
+
 type loginRequest struct {
 	Login    string `json:"login"`
 	Password string `json:"password"`

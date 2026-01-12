@@ -20,6 +20,10 @@ type BookPublicHandler struct {
 	Service *service.BookService
 }
 
+func NewBookPublicHandler(service *service.BookService) *BookPublicHandler {
+	return &BookPublicHandler{Service: service}
+}
+
 func (h *BookPublicHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
