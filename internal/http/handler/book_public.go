@@ -7,6 +7,7 @@ import (
 	"elibrary/internal/service"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -33,6 +34,7 @@ func (h *BookPublicHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
+		log.Printf("error getting %s: %v", idStr, err)
 		http.Error(w, "failed to get book", http.StatusInternalServerError)
 		return
 	}

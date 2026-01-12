@@ -65,6 +65,9 @@ func (s *BookService) Create(ctx context.Context, book domain.Book, works []repo
 		}
 		return tx.ReplaceBookWorks(ctx, book.ID, works)
 	})
+	if err != nil {
+		return nil, err
+	}
 
 	return &book, nil
 }

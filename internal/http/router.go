@@ -101,17 +101,23 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 
 		// ---------- works ----------
 		r.Route("/works", func(r chi.Router) {
-			r.Route("/{id}", workHandler.GetByID)
+			r.Get("/{id}", workHandler.GetByID)
 		})
 
 		// ---------- authors ----------
 		r.Route("/authors", func(r chi.Router) {
-			r.Route("/{id}", authorHandler.GetByID)
+			r.Get("/{id}", authorHandler.GetByID)
 		})
 
 		// ---------- publishers ----------
 		r.Route("/publishers", func(r chi.Router) {
-			r.Route("/{id}", publisherHandler.GetByID)
+			r.Get("/{id}", publisherHandler.GetByID)
+		})
+
+		// ---------- location ----------
+		r.Route("/locations", func(r chi.Router) {
+			r.Get("/{id}", locationHandler.GetByID)
+			r.Get("/child/{id}", locationHandler.GetByParentID)
 		})
 
 		// ---------- admin ----------
@@ -119,6 +125,24 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 			r.Route("/books", func(r chi.Router) {
 				r.Post("/", bookAdminHandler.Create)
 				r.Put("/{id}", bookAdminHandler.Update)
+			})
+
+			r.Route("/works", func(r chi.Router) {
+				r.Post("/", workHandler.Create)
+				r.Put("/{id}", workHandler.Update)
+				r.Delete("/{id}", workHandler.Delete)
+			})
+
+			r.Route("/authors", func(r chi.Router) {
+				r.Post("/", authorHandler.Create)
+				r.Put("/{id}", authorHandler.Update)
+				r.Delete("/{id}", authorHandler.Delete)
+			})
+
+			r.Route("/publishers", func(r chi.Router) {
+				r.Post("/", publisherHandler.Create)
+				r.Put("/{id}", publisherHandler.Update)
+				r.Delete("/{id}", publisherHandler.Delete)
 			})
 		})
 

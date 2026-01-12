@@ -21,16 +21,20 @@ func NewWorkService(workRepo repository.WorkRepository) *WorkService {
 	return &WorkService{workRepo: workRepo}
 }
 
-func (s *WorkService) Create(ctx context.Context, work domain.Work) (*domain.Work, error) {
+func (s *WorkService) Create(ctx context.Context, work domain.Work, authors []uuid.UUID) (*domain.Work, error) {
 	work.ID = uuid.New()
 
 	if strings.TrimSpace(work.Title) == "" {
 		return nil, errors.New("title is required")
 	}
 
-	err := s.workRepo.Create(ctx, work)
+	err := s.workRepo.WithTx(ctx, func(tx repository.WorkTx) error {
+		if err := tx.CreateWork(ctx, work); err != nil {
+			return err
+		}
+		return tx.ReplaceWorkAuthors(ctx, work.ID, authors)
+	})
 	if err != nil {
-		log.Printf("Error creating work: %s", err)
 		return nil, err
 	}
 
