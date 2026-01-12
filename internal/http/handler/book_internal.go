@@ -10,11 +10,11 @@ import (
 	"github.com/google/uuid"
 )
 
-type BooksInternalHandler struct {
+type BookInternalHandler struct {
 	Service *service.BookService
 }
 
-func (h *BooksInternalHandler) GetByID(w http.ResponseWriter, r *http.Request) {
+func (h *BookInternalHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
@@ -35,7 +35,7 @@ func (h *BooksInternalHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, book)
 }
 
-func (h *BooksInternalHandler) List(w http.ResponseWriter, r *http.Request) {
+func (h *BookInternalHandler) List(w http.ResponseWriter, r *http.Request) {
 	filter, err := parseBookFilter(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)

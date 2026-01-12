@@ -8,6 +8,7 @@ import (
 	"errors"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -37,39 +38,57 @@ func (s *WorkService) Create(ctx context.Context, work domain.Work) (*domain.Wor
 }
 
 type UpdateWorkRequest struct {
-	Title       *string `json:"title"`
-	Description *string `json:"description"`
-	Year        *int    `json:"year"`
+	Title       *string `json:"title,omitempty"`
+	Description *string `json:"description,omitempty"`
+	Year        *int    `json:"year,omitempty"`
+
+	Authors *[]uuid.UUID `json:"authors,omitempty"`
 }
 
 func (s *WorkService) Update(ctx context.Context, id uuid.UUID, updates UpdateWorkRequest) error {
-	work, err := s.workRepo.GetByID(ctx, id)
-	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			return domain.ErrNotFound
+	return s.workRepo.WithTx(ctx, func(tx repository.WorkTx) error {
+
+		work, err := tx.GetDomainByID(ctx, id)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				return domain.ErrNotFound
+			}
+			return err
 		}
-		return err
-	}
 
-	if updates.Title != nil {
-		if strings.TrimSpace(*updates.Title) == "" {
-			return errors.New("title is required")
+		if updates.Title != nil {
+			title := strings.TrimSpace(*updates.Title)
+			if title == "" {
+				return errors.New("title is required")
+			}
+			work.Title = title
 		}
-		work.Title = *updates.Title
-	}
+		if updates.Description != nil {
+			work.Description = updates.Description
+		}
+		if updates.Year != nil {
+			if *updates.Year < 0 || *updates.Year > time.Now().Year()+1 {
+				return errors.New("invalid year")
+			}
+			work.Year = updates.Year
+		}
 
-	if updates.Description != nil {
-		work.Description = updates.Description
-	}
+		if err := tx.UpdateWork(ctx, *work); err != nil {
+			return err
+		}
 
-	if updates.Year != nil {
-		work.Year = updates.Year
-	}
+		if updates.Authors != nil {
+			if err := tx.ReplaceWorkAuthors(ctx, work.ID, *updates.Authors); err != nil {
+				return err
+			}
+		}
 
-	return s.workRepo.Update(ctx, *work)
+		return nil
+
+	})
 }
 
-func (s *WorkService) GetByID(ctx context.Context, id uuid.UUID) (*domain.Work, error) {
+func (s *WorkService) GetByID(ctx context.Context, id uuid.UUID) (*readmodel.WorkDetailed, error) {
 	work, err := s.workRepo.GetByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
@@ -94,6 +113,6 @@ func (s *WorkService) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-func (s *WorkService) GetAll(ctx context.Context) ([]*readmodel.Work, error) {
+func (s *WorkService) GetAll(ctx context.Context) ([]*readmodel.WorkShort, error) {
 	return s.workRepo.GetAll(ctx)
 }

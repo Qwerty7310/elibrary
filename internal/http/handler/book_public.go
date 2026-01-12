@@ -15,11 +15,11 @@ import (
 	"github.com/google/uuid"
 )
 
-type BooksPublicHandler struct {
+type BookPublicHandler struct {
 	Service *service.BookService
 }
 
-func (h *BooksPublicHandler) GetByID(w http.ResponseWriter, r *http.Request) {
+func (h *BookPublicHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
@@ -40,7 +40,7 @@ func (h *BooksPublicHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, book)
 }
 
-func (h *BooksPublicHandler) List(w http.ResponseWriter, r *http.Request) {
+func (h *BookPublicHandler) List(w http.ResponseWriter, r *http.Request) {
 	filter, err := parseBookFilter(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -63,7 +63,7 @@ func (h *BooksPublicHandler) List(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *BooksPublicHandler) Search(w http.ResponseWriter, r *http.Request) {
+func (h *BookPublicHandler) Search(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	if q == "" {
 		http.Error(w, "q is empty", http.StatusBadRequest)

@@ -269,7 +269,7 @@ func loadWorks(
 	ctx context.Context,
 	tx pgx.Tx,
 	bookID uuid.UUID,
-	target *[]*readmodel.Work,
+	target *[]*readmodel.WorkShort,
 ) error {
 	rows, err := tx.Query(ctx, `
 		SELECT
@@ -291,7 +291,7 @@ func loadWorks(
 	}
 	defer rows.Close()
 
-	workMap := make(map[uuid.UUID]*readmodel.Work)
+	workMap := make(map[uuid.UUID]*readmodel.WorkShort)
 	for rows.Next() {
 		var (
 			workID uuid.UUID
@@ -316,7 +316,7 @@ func loadWorks(
 
 		work, ok := workMap[workID]
 		if !ok {
-			work = &readmodel.Work{
+			work = &readmodel.WorkShort{
 				ID:    workID,
 				Title: title,
 			}
@@ -658,7 +658,7 @@ func loadWorksForBooks(ctx context.Context, tx pgx.Tx, books []*bookBase) error 
 		workID uuid.UUID
 	}
 
-	workMap := make(map[workKey]*readmodel.Work)
+	workMap := make(map[workKey]*readmodel.WorkShort)
 
 	for rows.Next() {
 		var (
@@ -692,7 +692,7 @@ func loadWorksForBooks(ctx context.Context, tx pgx.Tx, books []*bookBase) error 
 		key := workKey{bookID, workID}
 		work, ok := workMap[key]
 		if !ok {
-			work = &readmodel.Work{
+			work = &readmodel.WorkShort{
 				ID:    workID,
 				Title: title,
 			}
@@ -801,7 +801,10 @@ func loadLocationsForBooks(ctx context.Context, tx pgx.Tx, books []*bookBase) er
 }
 
 func (r *BookRepository) WithTx(ctx context.Context, fn func(tx repository.BookTx) error) error {
-	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{
+		IsoLevel:   pgx.ReadCommitted,
+		AccessMode: pgx.ReadWrite,
+	})
 	if err != nil {
 		return err
 	}

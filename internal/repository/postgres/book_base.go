@@ -17,7 +17,7 @@ type bookBase struct {
 	Year           *int
 	Description    *string
 	Extra          map[string]any
-	Works          []*readmodel.Work
+	Works          []*readmodel.WorkShort
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }

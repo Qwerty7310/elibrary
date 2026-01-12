@@ -17,10 +17,6 @@ import (
 	httpMiddleware "elibrary/internal/http/middleware"
 )
 
-const (
-	prefix = 200
-)
-
 func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	r := chi.NewRouter()
 
@@ -73,9 +69,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 
 	// ---------- Handlers ----------
 	authHandler := &handler.AuthHandler{Service: authService}
-	booksPublicHandler := &handler.BooksPublicHandler{Service: bookService}
-	booksInternalHandler := &handler.BooksInternalHandler{Service: bookService}
-	booksAdminHandler := &handler.BooksAdminHandler{Service: bookService}
+	bookPublicHandler := &handler.BookPublicHandler{Service: bookService}
+	bookInternalHandler := &handler.BookInternalHandler{Service: bookService}
+	bookAdminHandler := &handler.BookAdminHandler{Service: bookService}
 
 	authorHandler := handler.NewAuthorHandler(authorService)
 	workHandler := handler.NewWorkHandler(workService)
@@ -89,26 +85,40 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	r.Route("/", func(r chi.Router) {
 		r.Use(httpMiddleware.Auth(jwtManager))
 
-		// ---------- Books ----------
+		// ---------- books ----------
 		r.Route("/books", func(r chi.Router) {
 			r.Route("/public", func(r chi.Router) {
-				r.Get("/", booksPublicHandler.List)
-				r.Get("/{id}", booksPublicHandler.GetByID)
+				r.Get("/", bookPublicHandler.List)
+				r.Get("/{id}", bookPublicHandler.GetByID)
 			})
 
 			r.Route("/internal", func(r chi.Router) {
-				r.Get("/", booksInternalHandler.List)
-				r.Get("/{id}", booksInternalHandler.GetByID)
+				r.Get("/", bookInternalHandler.List)
+				r.Get("/{id}", bookInternalHandler.GetByID)
 				//r.Get("/{id}/barcode", booksInternalHandler.Barcode)
 			})
+		})
+
+		// ---------- works ----------
+		r.Route("/works", func(r chi.Router) {
+			r.Route("/{id}", workHandler.GetByID)
+		})
+
+		// ---------- authors ----------
+		r.Route("/authors", func(r chi.Router) {
+			r.Route("/{id}", authorHandler.GetByID)
+		})
+
+		// ---------- publishers ----------
+		r.Route("/publishers", func(r chi.Router) {
+			r.Route("/{id}", publisherHandler.GetByID)
 		})
 
 		// ---------- admin ----------
 		r.Route("/admin", func(r chi.Router) {
 			r.Route("/books", func(r chi.Router) {
-				r.Post("/", booksAdminHandler.Create)
-				r.Put("/{id}", booksAdminHandler.Update)
-				r.Delete("/{id}", booksAdminHandler.Delete)
+				r.Post("/", bookAdminHandler.Create)
+				r.Put("/{id}", bookAdminHandler.Update)
 			})
 		})
 

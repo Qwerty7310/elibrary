@@ -63,11 +63,20 @@ func (r *WorkRepository) Update(ctx context.Context, work domain.Work) error {
 	return nil
 }
 
-func (r *WorkRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Work, error) {
-	var work domain.Work
+func (r *WorkRepository) GetByID(ctx context.Context, id uuid.UUID) (*readmodel.WorkDetailed, error) {
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{
+		IsoLevel:   pgx.ReadCommitted,
+		AccessMode: pgx.ReadOnly,
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
 
-	err := r.db.QueryRow(ctx, `
-		SELECT id, title, description, year, created_at, updated_at
+	var work readmodel.WorkDetailed
+
+	err = tx.QueryRow(ctx, `
+		SELECT id, title, description, year
 		FROM works
 		WHERE id = $1
 	`, id).Scan(
@@ -75,8 +84,6 @@ func (r *WorkRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Wor
 		&work.Title,
 		&work.Description,
 		&work.Year,
-		&work.CreatedAt,
-		&work.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -84,6 +91,42 @@ func (r *WorkRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Wor
 		}
 		return nil, err
 	}
+
+	rows, err := tx.Query(ctx, `
+		SELECT id, last_name, first_name, middle_name
+		FROM work_authors wa
+		JOIN authors a ON a.id = wa.author_id
+		WHERE wa.work_id = $1
+		ORDER BY a.last_name, a.first_name
+	`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var author readmodel.Author
+
+		if err := rows.Scan(
+			&author.ID,
+			&author.LastName,
+			&author.FirstName,
+			&author.MiddleName,
+		); err != nil {
+			return nil, err
+		}
+
+		work.Authors = append(work.Authors, author)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
 	return &work, nil
 }
 
@@ -104,7 +147,7 @@ func (r *WorkRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-func (r *WorkRepository) GetAll(ctx context.Context) ([]*readmodel.Work, error) {
+func (r *WorkRepository) GetAll(ctx context.Context) ([]*readmodel.WorkShort, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT
 			w.id,
@@ -123,8 +166,8 @@ func (r *WorkRepository) GetAll(ctx context.Context) ([]*readmodel.Work, error) 
 	}
 	defer rows.Close()
 
-	workMap := make(map[uuid.UUID]*readmodel.Work)
-	res := make([]*readmodel.Work, 0, 64)
+	workMap := make(map[uuid.UUID]*readmodel.WorkShort)
+	res := make([]*readmodel.WorkShort, 0, 64)
 
 	for rows.Next() {
 		var (
@@ -150,7 +193,7 @@ func (r *WorkRepository) GetAll(ctx context.Context) ([]*readmodel.Work, error) 
 
 		work, ok := workMap[workID]
 		if !ok {
-			work = &readmodel.Work{
+			work = &readmodel.WorkShort{
 				ID:    workID,
 				Title: title,
 			}
@@ -173,4 +216,22 @@ func (r *WorkRepository) GetAll(ctx context.Context) ([]*readmodel.Work, error) 
 	}
 
 	return res, nil
+}
+
+func (r *WorkRepository) WithTx(ctx context.Context, fn func(tx repository.WorkTx) error) error {
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{
+		IsoLevel:   pgx.ReadCommitted,
+		AccessMode: pgx.ReadWrite,
+	})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	wrapped := &workTx{tx: tx}
+	if err := fn(wrapped); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
 }

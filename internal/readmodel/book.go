@@ -12,10 +12,10 @@ type BookPublic struct {
 	Barcode        string    `json:"barcode"`
 	FactoryBarcode *string   `json:"factory_barcode,omitempty"`
 
-	Publisher   *Publisher `json:"publisher,omitempty"`
-	Works       []*Work    `json:"works,omitempty"`
-	Year        *int       `json:"year,omitempty"`
-	Description *string    `json:"description,omitempty"`
+	Publisher   *Publisher   `json:"publisher,omitempty"`
+	Works       []*WorkShort `json:"works,omitempty"`
+	Year        *int         `json:"year,omitempty"`
+	Description *string      `json:"description,omitempty"`
 
 	Extra map[string]any `json:"extra,omitempty"`
 
@@ -29,11 +29,11 @@ type BookInternal struct {
 	Barcode        string    `json:"barcode"`
 	FactoryBarcode *string   `json:"factory_barcode,omitempty"`
 
-	Publisher   *Publisher `json:"publisher,omitempty"`
-	Location    *Location  `json:"location,omitempty"`
-	Works       []*Work    `json:"works,omitempty"`
-	Year        *int       `json:"year,omitempty"`
-	Description *string    `json:"description,omitempty"`
+	Publisher   *Publisher   `json:"publisher,omitempty"`
+	Location    *Location    `json:"location,omitempty"`
+	Works       []*WorkShort `json:"works,omitempty"`
+	Year        *int         `json:"year,omitempty"`
+	Description *string      `json:"description,omitempty"`
 
 	Extra map[string]any `json:"extra,omitempty"`
 
@@ -56,12 +56,6 @@ type Location struct {
 	BuildingID   uuid.UUID `json:"building_id"`
 	BuildingName string    `json:"building_name"`
 	Address      string    `json:"address"`
-}
-
-type Work struct {
-	ID      uuid.UUID `json:"id"`
-	Title   string    `json:"title"`
-	Authors []Author  `json:"authors,omitempty"`
 }
 
 type Author struct {

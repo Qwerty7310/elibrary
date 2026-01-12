@@ -13,7 +13,7 @@ import (
 	"github.com/google/uuid"
 )
 
-type BooksAdminHandler struct {
+type BookAdminHandler struct {
 	Service *service.BookService
 }
 
@@ -22,7 +22,7 @@ type createBookRequest struct {
 	Works []repository.BookWorkInput `json:"works,omitempty"`
 }
 
-func (h *BooksAdminHandler) Create(w http.ResponseWriter, r *http.Request) {
+func (h *BookAdminHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req createBookRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -49,7 +49,7 @@ func (h *BooksAdminHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 type updateBookRequest = service.UpdateBookRequest
 
-func (h *BooksAdminHandler) Update(w http.ResponseWriter, r *http.Request) {
+func (h *BookAdminHandler) Update(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
