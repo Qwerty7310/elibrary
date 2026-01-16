@@ -30,7 +30,7 @@ type createBookRequest struct {
 func (h *BookAdminHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req createBookRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		log.Printf("Failed to decode request body: %s", err)
+		log.Printf("Failed to decode request body: %v", err)
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
@@ -43,11 +43,11 @@ func (h *BookAdminHandler) Create(w http.ResponseWriter, r *http.Request) {
 	created, err := h.Service.Create(r.Context(), req.Book, req.Works)
 	if err != nil {
 		if errors.Is(err, domain.ErrBarcodeExists) {
-			log.Printf("Failed to create book: %s", err)
+			log.Printf("Failed to create book: %v", err)
 			http.Error(w, "barcode already exists", http.StatusConflict)
 			return
 		}
-		log.Printf("Failed to create work: %s", err)
+		log.Printf("Failed to create work: %v", err)
 		http.Error(w, "failed to create book", http.StatusInternalServerError)
 		return
 	}
@@ -61,14 +61,14 @@ func (h *BookAdminHandler) Update(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		log.Printf("Failed to parse id: %s", err)
+		log.Printf("Failed to parse id: %v", err)
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
 	}
 
 	var req updateBookRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		log.Printf("Failed to decode request body: %s", err)
+		log.Printf("Failed to decode request body: %v", err)
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}

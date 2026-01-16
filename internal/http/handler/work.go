@@ -29,7 +29,7 @@ type createWorkRequest struct {
 func (h *WorkHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req createWorkRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		log.Printf("Failed to decode request body: %s", err)
+		log.Printf("failed to decode request body: %s", err)
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
@@ -41,7 +41,7 @@ func (h *WorkHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	created, err := h.Service.Create(r.Context(), req.Work, req.Authors)
 	if err != nil {
-		log.Printf("Failed to create work: %s", err)
+		log.Printf("failed to create work: %s", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -55,14 +55,14 @@ func (h *WorkHandler) Update(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		log.Printf("Failed to parse id: %s", err)
+		log.Printf("failed to parse work id: %s", err)
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
 	}
 
 	var req updateWorkRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		log.Printf("Failed to decode request body: %s", err)
+		log.Printf("failed to decode request body: %s", err)
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
@@ -72,16 +72,19 @@ func (h *WorkHandler) Update(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "work not found", http.StatusNotFound)
 			return
 		}
-		log.Printf("Failed to update work: %s", err)
+		log.Printf("failed to update work: %s", err)
 		http.Error(w, "failed to update work", http.StatusInternalServerError)
+		return
 	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *WorkHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		log.Printf("Failed to parse id: %s", err)
+		log.Printf("failed to parse id: %s", err)
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
 	}
@@ -99,7 +102,7 @@ func (h *WorkHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		log.Printf("invalid id %s: %v", idStr, err)
+		log.Printf("error parsing ID %s: %v", idStr, err)
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
 	}
@@ -110,7 +113,7 @@ func (h *WorkHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
-		log.Printf("error getting %s: %v", idStr, err)
+		log.Printf("error getting work %s: %v", idStr, err)
 		http.Error(w, "failed to get work", http.StatusInternalServerError)
 		return
 	}
