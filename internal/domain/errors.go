@@ -8,4 +8,5 @@ var (
 	ErrForbidden      = errors.New("forbidden")
 	ErrInvalidBarcode = errors.New("invalid barcode")
 	ErrBarcodeExists  = errors.New("barcode already exists")
+	ErrLoginExists    = errors.New("login already exists")
 )

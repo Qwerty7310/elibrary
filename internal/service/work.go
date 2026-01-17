@@ -6,7 +6,6 @@ import (
 	"elibrary/internal/readmodel"
 	"elibrary/internal/repository"
 	"errors"
-	"log"
 	"strings"
 	"time"
 
@@ -110,7 +109,6 @@ func (s *WorkService) Delete(ctx context.Context, id uuid.UUID) error {
 		if errors.Is(err, repository.ErrNotFound) {
 			return domain.ErrNotFound
 		}
-		log.Printf("Error deleting work: %s", err)
 		return err
 	}
 

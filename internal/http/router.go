@@ -68,6 +68,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	workService := service.NewWorkService(workRepo)
 	publisherService := service.NewPublisherService(publisherRepo)
 	locationService := service.NewLocationService(locationRepo, barcodeService)
+	userService := service.NewUserService(userRepo)
 
 	// ---------- Handlers ----------
 	authHandler := handler.NewAuthHandler(authService)
@@ -79,6 +80,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	workHandler := handler.NewWorkHandler(workService)
 	publisherHandler := handler.NewPublisherHandler(publisherService)
 	locationHandler := handler.NewLocationHandler(locationService)
+	userHandler := handler.NewUserHandler(userService)
 
 	// ---------- Public routes ----------
 	r.Get("/health", handler.Health)
@@ -86,7 +88,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 
 	// ---------- Protected routes ----------
 	r.Route("/", func(r chi.Router) {
-		r.Use(httpMiddleware.Auth(jwtManager))
+		r.Use(httpMiddleware.Auth(jwtManager, userRepo))
 
 		// ---------- books ----------
 		r.Route("/books", func(r chi.Router) {
@@ -125,6 +127,15 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 
 		// ---------- admin ----------
 		r.Route("/admin", func(r chi.Router) {
+			r.Use(httpMiddleware.RequireRole("admin"))
+
+			r.Route("/users", func(r chi.Router) {
+				r.Get("/{id}", userHandler.GetByID)
+				r.Post("/", userHandler.Create)
+				r.Put("/{id}", userHandler.Update)
+				r.Delete("/{id}", userHandler.Delete)
+			})
+
 			r.Route("/books", func(r chi.Router) {
 				r.Post("/", bookAdminHandler.Create)
 				r.Put("/{id}", bookAdminHandler.Update)

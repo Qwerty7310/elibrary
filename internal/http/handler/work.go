@@ -62,7 +62,7 @@ func (h *WorkHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	var req updateWorkRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		log.Printf("failed to decode request body: %s", err)
+		log.Printf("failed to decode request body: %v", err)
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
@@ -73,11 +73,10 @@ func (h *WorkHandler) Update(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "work not found", http.StatusNotFound)
 			return
 		}
-		log.Printf("failed to update work: %s", err)
+		log.Printf("failed to update work: %v", err)
 		http.Error(w, "failed to update work", http.StatusInternalServerError)
 		return
 	}
-
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -85,7 +84,7 @@ func (h *WorkHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		log.Printf("failed to parse id: %s", err)
+		log.Printf("failed to parse id: %v", err)
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
 	}
@@ -96,11 +95,10 @@ func (h *WorkHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "work not found", http.StatusNotFound)
 			return
 		}
-		log.Printf("Failed to delete work: %s", err)
+		log.Printf("Failed to delete work: %v", err)
 		http.Error(w, "failed to delete work", http.StatusInternalServerError)
 		return
 	}
-
 	w.WriteHeader(http.StatusNoContent)
 }
 
