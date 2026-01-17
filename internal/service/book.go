@@ -148,10 +148,6 @@ func (s *BookService) GetPublicByID(ctx context.Context, id uuid.UUID) (*readmod
 }
 
 func (s *BookService) GetInternalByID(ctx context.Context, id uuid.UUID) (*readmodel.BookInternal, error) {
-	if !auth.HasRole(ctx, auth.RoleAdmin) {
-		return nil, domain.ErrForbidden
-	}
-
 	book, err := s.bookRepo.GetInternalByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
@@ -176,10 +172,6 @@ func (s *BookService) GetPublic(ctx context.Context, filter repository.BookFilte
 }
 
 func (s *BookService) GetInternal(ctx context.Context, filter repository.BookFilter) ([]*readmodel.BookInternal, error) {
-	if !auth.HasRole(ctx, auth.RoleAdmin) {
-		return nil, domain.ErrForbidden
-	}
-
 	books, err := s.bookRepo.GetInternal(ctx, filter)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {

@@ -2,6 +2,7 @@ package http
 
 import (
 	"elibrary/internal/config"
+	"elibrary/internal/http/auth"
 	"elibrary/internal/http/handler"
 	"elibrary/internal/repository/postgres"
 	"elibrary/internal/service"
@@ -127,7 +128,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 
 		// ---------- admin ----------
 		r.Route("/admin", func(r chi.Router) {
-			r.Use(httpMiddleware.RequireRole("admin"))
+			r.Use(httpMiddleware.RequireRole(auth.RoleAdmin))
 
 			r.Route("/users", func(r chi.Router) {
 				r.Get("/{id}", userHandler.GetByID)
