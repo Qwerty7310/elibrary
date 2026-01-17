@@ -1,6 +1,1875 @@
-import { BookList } from "./pages/BookList"
+import {useEffect, useMemo, useState} from "react"
 import "./App.css"
+import {loginUser} from "./api/auth"
+import {createBook, searchBooksInternal, searchBooksPublic} from "./api/books"
+import {createAuthor, getAuthorByID} from "./api/authors"
+import {createPublisher} from "./api/publishers"
+import {createWork} from "./api/works"
+import {createLocation} from "./api/locations"
+import {
+    getAuthorsReference,
+    getPublishersReference,
+    getWorksReference,
+} from "./api/reference"
+import {ApiError, setToken} from "./api/http"
+import {getUserByID, updateUser} from "./api/users"
+import {SearchBar} from "./components/SearchBar"
+import {SafeImage} from "./components/SafeImage"
+import type {
+    Author,
+    AuthorSummary,
+    BookInternal,
+    BookPublic,
+    BookWorkInput,
+    Publisher,
+    User,
+    WorkShort,
+} from "./types/library"
+
+type TabKey = "books" | "works" | "authors" | "profile"
+
+type BookDraft = {
+    title: string
+    publisherId: string
+    year: string
+    description: string
+    locationId: string
+    factoryBarcode: string
+    coverUrl: string
+    workIds: string[]
+}
+
+type WorkDraft = {
+    title: string
+    description: string
+    year: string
+    authorIds: string[]
+}
+
+type AuthorDraft = {
+    lastName: string
+    firstName: string
+    middleName: string
+    birthDate: string
+    deathDate: string
+    bio: string
+    photoUrl: string
+}
+
+type PublisherDraft = {
+    name: string
+    logoUrl: string
+    webUrl: string
+}
+
+type LocationDraft = {
+    parentId: string
+    type: string
+    name: string
+    address: string
+    description: string
+}
+
+const emptyBookDraft: BookDraft = {
+    title: "",
+    publisherId: "",
+    year: "",
+    description: "",
+    locationId: "",
+    factoryBarcode: "",
+    coverUrl: "",
+    workIds: [],
+}
+
+const emptyWorkDraft: WorkDraft = {
+    title: "",
+    description: "",
+    year: "",
+    authorIds: [],
+}
+
+const emptyAuthorDraft: AuthorDraft = {
+    lastName: "",
+    firstName: "",
+    middleName: "",
+    birthDate: "",
+    deathDate: "",
+    bio: "",
+    photoUrl: "",
+}
+
+const emptyPublisherDraft: PublisherDraft = {
+    name: "",
+    logoUrl: "",
+    webUrl: "",
+}
+
+const emptyLocationDraft: LocationDraft = {
+    parentId: "",
+    type: "",
+    name: "",
+    address: "",
+    description: "",
+}
+
+function parseJwt(token: string) {
+    try {
+        const base64 = token.split(".")[1]
+        const normalized = base64.replace(/-/g, "+").replace(/_/g, "/")
+        const padded = normalized.padEnd(
+            normalized.length + ((4 - (normalized.length % 4)) % 4),
+            "="
+        )
+        const json = atob(padded)
+        return JSON.parse(json) as {sub?: string}
+    } catch {
+        return null
+    }
+}
+
+function getAuthorName(author: AuthorSummary) {
+    return [author.last_name, author.first_name, author.middle_name]
+        .filter(Boolean)
+        .join(" ")
+}
+
+function formatLocation(location?: BookInternal["location"]) {
+    if (!location) {
+        return "—"
+    }
+    const parts = [
+        location.building_name,
+        location.room_name,
+        location.cabinet_name,
+        location.shelf_name,
+    ].filter(Boolean)
+    const address = location.address ? `, ${location.address}` : ""
+    return `${parts.join(" · ")}${address}`
+}
+
+function getCoverUrl(book: BookPublic) {
+    const extra = book.extra ?? {}
+    const cover = extra.cover_url
+    return typeof cover === "string" ? cover : null
+}
 
 export default function App() {
-    return <BookList />
+    const [activeTab, setActiveTab] = useState<TabKey>("books")
+    const [token, setAuthToken] = useState<string | null>(
+        localStorage.getItem("auth_token")
+    )
+    const [loginName, setLoginName] = useState(
+        localStorage.getItem("login_name") ?? ""
+    )
+    const [user, setUser] = useState<User | null>(null)
+    const [isAdmin, setIsAdmin] = useState(false)
+    const [authError, setAuthError] = useState<string | null>(null)
+    const [isLoginOpen, setIsLoginOpen] = useState(false)
+    const [loginDraft, setLoginDraft] = useState({
+        login: "",
+        password: "",
+    })
+
+    const [authors, setAuthors] = useState<AuthorSummary[]>([])
+    const [works, setWorks] = useState<WorkShort[]>([])
+    const [publishers, setPublishers] = useState<Publisher[]>([])
+
+    const [booksQuery, setBooksQuery] = useState("")
+    const [books, setBooks] = useState<BookPublic[]>([])
+    const [booksError, setBooksError] = useState<string | null>(null)
+    const [booksLoading, setBooksLoading] = useState(false)
+
+    const [workQuery, setWorkQuery] = useState("")
+    const [selectedWork, setSelectedWork] = useState<WorkShort | null>(null)
+    const [workBooks, setWorkBooks] = useState<BookPublic[]>([])
+    const [workBooksLoading, setWorkBooksLoading] = useState(false)
+
+    const [authorQuery, setAuthorQuery] = useState("")
+    const [selectedAuthor, setSelectedAuthor] = useState<Author | null>(null)
+    const [authorBooks, setAuthorBooks] = useState<BookPublic[]>([])
+    const [authorBooksLoading, setAuthorBooksLoading] = useState(false)
+
+    const [isBookModalOpen, setIsBookModalOpen] = useState(false)
+    const [bookDraft, setBookDraft] = useState<BookDraft>(emptyBookDraft)
+    const [bookError, setBookError] = useState<string | null>(null)
+    const [bookSaving, setBookSaving] = useState(false)
+
+    const [isWorkModalOpen, setIsWorkModalOpen] = useState(false)
+    const [workDraft, setWorkDraft] = useState<WorkDraft>(emptyWorkDraft)
+    const [workError, setWorkError] = useState<string | null>(null)
+    const [workSaving, setWorkSaving] = useState(false)
+
+    const [isAuthorModalOpen, setIsAuthorModalOpen] = useState(false)
+    const [authorDraft, setAuthorDraft] = useState<AuthorDraft>(emptyAuthorDraft)
+    const [authorError, setAuthorError] = useState<string | null>(null)
+    const [authorSaving, setAuthorSaving] = useState(false)
+
+    const [isPublisherModalOpen, setIsPublisherModalOpen] = useState(false)
+    const [publisherDraft, setPublisherDraft] =
+        useState<PublisherDraft>(emptyPublisherDraft)
+    const [publisherError, setPublisherError] = useState<string | null>(null)
+    const [publisherSaving, setPublisherSaving] = useState(false)
+
+    const [isLocationModalOpen, setIsLocationModalOpen] = useState(false)
+    const [locationDraft, setLocationDraft] =
+        useState<LocationDraft>(emptyLocationDraft)
+    const [locationError, setLocationError] = useState<string | null>(null)
+    const [locationSaving, setLocationSaving] = useState(false)
+
+    const [profileDraft, setProfileDraft] = useState({
+        login: "",
+        first_name: "",
+        last_name: "",
+        middle_name: "",
+        email: "",
+        password: "",
+        is_active: true,
+    })
+    const [profileError, setProfileError] = useState<string | null>(null)
+    const [profileSaving, setProfileSaving] = useState(false)
+
+    useEffect(() => {
+        if (!token) {
+            setIsLoginOpen(true)
+            setUser(null)
+            setIsAdmin(false)
+            return
+        }
+
+        const claims = parseJwt(token)
+        const userId = claims?.sub
+        if (!userId) {
+            setAuthToken(null)
+            setToken(null)
+            return
+        }
+
+        ;(async () => {
+            try {
+                const current = await getUserByID(userId)
+                setUser(current)
+                setIsAdmin(current.roles.some((role) => role.code === "admin"))
+                setProfileDraft({
+                    login: current.login,
+                    first_name: current.first_name,
+                    last_name: current.last_name ?? "",
+                    middle_name: current.middle_name ?? "",
+                    email: current.email ?? "",
+                    password: "",
+                    is_active: current.is_active,
+                })
+            } catch (err) {
+                const apiErr = err as ApiError
+                if (apiErr.status === 403 || apiErr.status === 404) {
+                    const fallbackUser = {
+                        id: userId,
+                        login: loginName || "user",
+                        first_name: "",
+                        last_name: "",
+                        middle_name: "",
+                        email: "",
+                        is_active: true,
+                        roles: [],
+                    }
+                    setUser(fallbackUser)
+                    setIsAdmin(false)
+                    setProfileDraft({
+                        login: fallbackUser.login,
+                        first_name: "",
+                        last_name: "",
+                        middle_name: "",
+                        email: "",
+                        password: "",
+                        is_active: true,
+                    })
+                    return
+                }
+                setAuthError("Не удалось загрузить профиль")
+            }
+        })()
+    }, [token, loginName])
+
+    useEffect(() => {
+        if (!token) {
+            return
+        }
+        ;(async () => {
+            try {
+                const [authorsData, worksData, publishersData] =
+                    await Promise.all([
+                        getAuthorsReference(),
+                        getWorksReference(),
+                        getPublishersReference(),
+                    ])
+                setAuthors(authorsData)
+                setWorks(worksData)
+                setPublishers(publishersData)
+            } catch {
+                setAuthError("Не удалось загрузить справочники")
+            }
+        })()
+    }, [token])
+
+    const filteredWorks = useMemo(() => {
+        const needle = workQuery.trim().toLowerCase()
+        if (!needle) {
+            return works
+        }
+        return works.filter((work) =>
+            work.title.toLowerCase().includes(needle)
+        )
+    }, [workQuery, works])
+
+    const filteredAuthors = useMemo(() => {
+        const needle = authorQuery.trim().toLowerCase()
+        if (!needle) {
+            return authors
+        }
+        return authors.filter((author) =>
+            getAuthorName(author).toLowerCase().includes(needle)
+        )
+    }, [authorQuery, authors])
+
+    async function handleLoginSubmit(event: React.FormEvent) {
+        event.preventDefault()
+        setAuthError(null)
+        try {
+            const tokenValue = await loginUser(
+                loginDraft.login.trim(),
+                loginDraft.password
+            )
+            setAuthToken(tokenValue)
+            setToken(tokenValue)
+            localStorage.setItem("login_name", loginDraft.login.trim())
+            setLoginName(loginDraft.login.trim())
+            setIsLoginOpen(false)
+            setLoginDraft({login: "", password: ""})
+        } catch {
+            setAuthError("Не удалось войти. Проверьте логин и пароль.")
+        }
+    }
+
+    function handleLogout() {
+        setAuthToken(null)
+        setToken(null)
+        setUser(null)
+        setIsAdmin(false)
+        localStorage.removeItem("login_name")
+        setLoginName("")
+        setActiveTab("books")
+        setBooks([])
+    }
+
+    async function handleBookSearch(value: string) {
+        if (!token) {
+            setIsLoginOpen(true)
+            return
+        }
+        setBooksQuery(value)
+        setBooksError(null)
+        if (!value.trim()) {
+            setBooks([])
+            return
+        }
+        setBooksLoading(true)
+        try {
+            const data = isAdmin
+                ? await searchBooksInternal(value)
+                : await searchBooksPublic(value)
+            setBooks(data)
+            if (data.length === 0) {
+                setBooksError("Ничего не найдено")
+            }
+        } catch {
+            setBooksError("Не удалось выполнить поиск")
+        } finally {
+            setBooksLoading(false)
+        }
+    }
+
+    async function handleWorkSelect(work: WorkShort) {
+        setSelectedWork(work)
+        setWorkBooks([])
+        setWorkBooksLoading(true)
+        try {
+            const data = isAdmin
+                ? await searchBooksInternal(work.title)
+                : await searchBooksPublic(work.title)
+            setWorkBooks(data)
+        } catch {
+            setWorkBooks([])
+        } finally {
+            setWorkBooksLoading(false)
+        }
+    }
+
+    async function handleAuthorSelect(author: AuthorSummary) {
+        setSelectedAuthor(null)
+        setAuthorBooks([])
+        setAuthorBooksLoading(true)
+        try {
+            const [details, data] = await Promise.all([
+                getAuthorByID(author.id),
+                isAdmin
+                    ? searchBooksInternal(getAuthorName(author))
+                    : searchBooksPublic(getAuthorName(author)),
+            ])
+            setSelectedAuthor(details)
+            setAuthorBooks(data)
+        } catch {
+            setAuthorBooks([])
+        } finally {
+            setAuthorBooksLoading(false)
+        }
+    }
+
+    async function handleCreateBook() {
+        if (!bookDraft.title.trim()) {
+            setBookError("Название книги обязательно")
+            return
+        }
+        if (bookDraft.workIds.length === 0) {
+            setBookError("Выберите хотя бы одно произведение")
+            return
+        }
+        setBookSaving(true)
+        setBookError(null)
+        const worksPayload: BookWorkInput[] = bookDraft.workIds.map(
+            (workId, index) => ({
+                work_id: workId,
+                position: index + 1,
+            })
+        )
+        const payload = {
+            book: {
+                title: bookDraft.title.trim(),
+                publisher_id: bookDraft.publisherId || undefined,
+                year: bookDraft.year ? Number(bookDraft.year) : undefined,
+                description: bookDraft.description.trim() || undefined,
+                location_id: bookDraft.locationId || undefined,
+                factory_barcode: bookDraft.factoryBarcode.trim() || undefined,
+                extra: bookDraft.coverUrl.trim()
+                    ? {cover_url: bookDraft.coverUrl.trim()}
+                    : undefined,
+            },
+            works: worksPayload,
+        }
+        try {
+            await createBook(payload)
+            setBookDraft(emptyBookDraft)
+            setIsBookModalOpen(false)
+            if (booksQuery.trim()) {
+                await handleBookSearch(booksQuery)
+            }
+        } catch {
+            setBookError("Не удалось создать книгу")
+        } finally {
+            setBookSaving(false)
+        }
+    }
+
+    async function handleCreateWork() {
+        if (!workDraft.title.trim()) {
+            setWorkError("Название произведения обязательно")
+            return
+        }
+        setWorkSaving(true)
+        setWorkError(null)
+        try {
+            const created = await createWork({
+                work: {
+                    title: workDraft.title.trim(),
+                    description: workDraft.description.trim() || undefined,
+                    year: workDraft.year ? Number(workDraft.year) : undefined,
+                },
+                authors: workDraft.authorIds,
+            })
+            setWorks((prev) => [created, ...prev])
+            setWorkDraft(emptyWorkDraft)
+            setIsWorkModalOpen(false)
+            if (isBookModalOpen) {
+                setBookDraft((prev) => ({
+                    ...prev,
+                    workIds: prev.workIds.includes(created.id)
+                        ? prev.workIds
+                        : [...prev.workIds, created.id],
+                }))
+            }
+        } catch {
+            setWorkError("Не удалось создать произведение")
+        } finally {
+            setWorkSaving(false)
+        }
+    }
+
+    async function handleCreateAuthor() {
+        if (!authorDraft.lastName.trim()) {
+            setAuthorError("Фамилия обязательна")
+            return
+        }
+        setAuthorSaving(true)
+        setAuthorError(null)
+        try {
+            const created = await createAuthor({
+                last_name: authorDraft.lastName.trim(),
+                first_name: authorDraft.firstName.trim() || undefined,
+                middle_name: authorDraft.middleName.trim() || undefined,
+                birth_date: authorDraft.birthDate || undefined,
+                death_date: authorDraft.deathDate || undefined,
+                bio: authorDraft.bio.trim() || undefined,
+                photo_url: authorDraft.photoUrl.trim() || undefined,
+            })
+            const summary = {
+                id: created.id,
+                last_name: created.last_name,
+                first_name: created.first_name,
+                middle_name: created.middle_name,
+            }
+            setAuthors((prev) => [summary, ...prev])
+            setAuthorDraft(emptyAuthorDraft)
+            setIsAuthorModalOpen(false)
+            if (isWorkModalOpen) {
+                setWorkDraft((prev) => ({
+                    ...prev,
+                    authorIds: prev.authorIds.includes(created.id)
+                        ? prev.authorIds
+                        : [...prev.authorIds, created.id],
+                }))
+            }
+        } catch {
+            setAuthorError("Не удалось создать автора")
+        } finally {
+            setAuthorSaving(false)
+        }
+    }
+
+    async function handleCreatePublisher() {
+        if (!publisherDraft.name.trim()) {
+            setPublisherError("Название издательства обязательно")
+            return
+        }
+        setPublisherSaving(true)
+        setPublisherError(null)
+        try {
+            const created = await createPublisher({
+                name: publisherDraft.name.trim(),
+                logo_url: publisherDraft.logoUrl.trim() || undefined,
+                web_url: publisherDraft.webUrl.trim() || undefined,
+            })
+            setPublishers((prev) => [created, ...prev])
+            setPublisherDraft(emptyPublisherDraft)
+            setIsPublisherModalOpen(false)
+            if (isBookModalOpen) {
+                setBookDraft((prev) => ({
+                    ...prev,
+                    publisherId: created.id,
+                }))
+            }
+        } catch {
+            setPublisherError("Не удалось создать издательство")
+        } finally {
+            setPublisherSaving(false)
+        }
+    }
+
+    async function handleCreateLocation() {
+        if (!locationDraft.name.trim()) {
+            setLocationError("Название локации обязательно")
+            return
+        }
+        if (!locationDraft.type.trim()) {
+            setLocationError("Тип локации обязателен")
+            return
+        }
+        setLocationSaving(true)
+        setLocationError(null)
+        try {
+            const created = await createLocation({
+                parent_id: locationDraft.parentId || undefined,
+                type: locationDraft.type.trim(),
+                name: locationDraft.name.trim(),
+                address: locationDraft.address.trim() || undefined,
+                description: locationDraft.description.trim() || undefined,
+            })
+            setLocationDraft(emptyLocationDraft)
+            setIsLocationModalOpen(false)
+            if (isBookModalOpen) {
+                setBookDraft((prev) => ({
+                    ...prev,
+                    locationId: created.id,
+                }))
+            }
+        } catch {
+            setLocationError("Не удалось создать локацию")
+        } finally {
+            setLocationSaving(false)
+        }
+    }
+
+    async function handleProfileSave() {
+        if (!user) {
+            return
+        }
+        setProfileSaving(true)
+        setProfileError(null)
+        try {
+            const payload: Record<string, unknown> = {
+                login: profileDraft.login.trim(),
+                first_name: profileDraft.first_name.trim(),
+                last_name: profileDraft.last_name.trim() || undefined,
+                middle_name: profileDraft.middle_name.trim() || undefined,
+                email: profileDraft.email.trim() || undefined,
+                is_active: profileDraft.is_active,
+            }
+            if (profileDraft.password.trim()) {
+                payload.password = profileDraft.password
+            }
+            await updateUser(user.id, payload)
+            setProfileDraft((prev) => ({...prev, password: ""}))
+        } catch {
+            setProfileError("Не удалось обновить профиль")
+        } finally {
+            setProfileSaving(false)
+        }
+    }
+
+    return (
+        <div className="app-shell">
+            <header className="top-bar">
+                <div>
+                    <p className="eyebrow">электронная библиотека</p>
+                    <h1>Поиск фонда и управление каталогом</h1>
+                </div>
+                <div className="user-block">
+                    {user && token ? (
+                        <>
+                            <span className="user-badge">
+                                {user.login || "Пользователь"}
+                                {isAdmin ? " · админ" : ""}
+                            </span>
+                            <button
+                                className="ghost-button"
+                                type="button"
+                                onClick={handleLogout}
+                            >
+                                Выйти
+                            </button>
+                        </>
+                    ) : (
+                        <button
+                            className="primary-button"
+                            type="button"
+                            onClick={() => setIsLoginOpen(true)}
+                        >
+                            Войти
+                        </button>
+                    )}
+                </div>
+            </header>
+
+            <nav className="tab-bar">
+                {(["books", "works", "authors", "profile"] as TabKey[]).map(
+                    (tab) => (
+                        <button
+                            key={tab}
+                            className={`tab-button ${
+                                activeTab === tab ? "active" : ""
+                            }`}
+                            type="button"
+                            onClick={() => setActiveTab(tab)}
+                        >
+                            {tab === "books" && "Книги"}
+                            {tab === "works" && "Произведения"}
+                            {tab === "authors" && "Авторы"}
+                            {tab === "profile" && "Личный кабинет"}
+                        </button>
+                    )
+                )}
+            </nav>
+
+            {authError && <p className="error-banner">{authError}</p>}
+
+            {activeTab === "books" && (
+                <section className="panel">
+                    <div className="panel-header">
+                        <div>
+                            <h2>Поиск книг</h2>
+                            <p className="results-caption">
+                                Поиск по штрихкоду, названию, автору или
+                                произведению.
+                            </p>
+                        </div>
+                        {isAdmin && (
+                            <div className="panel-actions">
+                                <button
+                                    className="primary-button"
+                                    type="button"
+                                    onClick={() => setIsBookModalOpen(true)}
+                                >
+                                    Создать книгу
+                                </button>
+                                <button
+                                    className="ghost-button"
+                                    type="button"
+                                    onClick={() => setIsPublisherModalOpen(true)}
+                                >
+                                    Создать издательство
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                    <SearchBar
+                        onSearch={handleBookSearch}
+                        onReset={() => {
+                            setBooks([])
+                            setBooksQuery("")
+                            setBooksError(null)
+                        }}
+                        isLoading={booksLoading}
+                    />
+                    {booksError && <p className="error-banner">{booksError}</p>}
+                    {!booksLoading && books.length === 0 && booksQuery && (
+                        <p className="status-line">Нет результатов</p>
+                    )}
+                    <div className="card-grid">
+                        {books.map((book) => (
+                            <article key={book.id} className="item-card">
+                                <div className="item-header">
+                                    <SafeImage
+                                        src={getCoverUrl(book)}
+                                        alt={book.title}
+                                        className="cover-image"
+                                    />
+                                    <div>
+                                        <h3>{book.title}</h3>
+                                        <p className="item-meta">
+                                            {book.publisher?.name ||
+                                                "Без издательства"}
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="item-body">
+                                    <p>
+                                        <strong>Произведения:</strong>{" "}
+                                        {book.works?.length
+                                            ? book.works
+                                                  .map((work) => work.title)
+                                                  .join(", ")
+                                            : "—"}
+                                    </p>
+                                    <p>
+                                        <strong>Авторы:</strong>{" "}
+                                        {book.works?.length
+                                            ? Array.from(
+                                                  new Set(
+                                                      book.works.flatMap(
+                                                          (work) =>
+                                                              work.authors.map(
+                                                                  (author) =>
+                                                                      getAuthorName(
+                                                                          author
+                                                                      )
+                                                              )
+                                                      )
+                                                  )
+                                              ).join(", ")
+                                            : "—"}
+                                    </p>
+                                    {book.year && (
+                                        <p>
+                                            <strong>Год:</strong> {book.year}
+                                        </p>
+                                    )}
+                                    {isAdmin && "location" in book && (
+                                        <p>
+                                            <strong>Локация:</strong>{" "}
+                                            {formatLocation(
+                                                (book as BookInternal).location
+                                            )}
+                                        </p>
+                                    )}
+                                </div>
+                            </article>
+                        ))}
+                    </div>
+                </section>
+            )}
+
+            {activeTab === "works" && (
+                <section className="panel">
+                    <div className="panel-header">
+                        <div>
+                            <h2>Произведения и книги</h2>
+                            <p className="results-caption">
+                                Выберите произведение и смотрите, в каких
+                                книгах оно встречается.
+                            </p>
+                        </div>
+                        {isAdmin && (
+                            <button
+                                className="primary-button"
+                                type="button"
+                                onClick={() => setIsWorkModalOpen(true)}
+                            >
+                                Создать произведение
+                            </button>
+                        )}
+                    </div>
+                    <div className="split-layout">
+                        <div>
+                            <label className="field-label">
+                                Поиск произведения
+                            </label>
+                            <input
+                                className="text-input"
+                                value={workQuery}
+                                onChange={(event) =>
+                                    setWorkQuery(event.target.value)
+                                }
+                                placeholder="Название произведения"
+                            />
+                            <div className="list">
+                                {filteredWorks.map((work) => (
+                                    <button
+                                        key={work.id}
+                                        className={`list-item ${
+                                            selectedWork?.id === work.id
+                                                ? "active"
+                                                : ""
+                                        }`}
+                                        type="button"
+                                        onClick={() => handleWorkSelect(work)}
+                                    >
+                                        <span>{work.title}</span>
+                                        <span className="item-meta">
+                                            {work.authors
+                                                .map(getAuthorName)
+                                                .join(", ") || "Без автора"}
+                                        </span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        <div>
+                            <h3 className="subheading">
+                                Книги с этим произведением
+                            </h3>
+                            {workBooksLoading && (
+                                <p className="status-line">Загрузка...</p>
+                            )}
+                            {!workBooksLoading && workBooks.length === 0 && (
+                                <p className="status-line">Нет данных</p>
+                            )}
+                            <div className="stack">
+                                {workBooks.map((book) => (
+                                    <div key={book.id} className="mini-card">
+                                        <span>{book.title}</span>
+                                        {isAdmin && "location" in book && (
+                                            <span className="item-meta">
+                                                {formatLocation(
+                                                    (book as BookInternal)
+                                                        .location
+                                                )}
+                                            </span>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            )}
+
+            {activeTab === "authors" && (
+                <section className="panel">
+                    <div className="panel-header">
+                        <div>
+                            <h2>Авторы и книги</h2>
+                            <p className="results-caption">
+                                Ищите автора и узнавайте, в каких книгах он
+                                встречается.
+                            </p>
+                        </div>
+                        {isAdmin && (
+                            <button
+                                className="primary-button"
+                                type="button"
+                                onClick={() => setIsAuthorModalOpen(true)}
+                            >
+                                Создать автора
+                            </button>
+                        )}
+                    </div>
+                    <div className="split-layout">
+                        <div>
+                            <label className="field-label">Поиск автора</label>
+                            <input
+                                className="text-input"
+                                value={authorQuery}
+                                onChange={(event) =>
+                                    setAuthorQuery(event.target.value)
+                                }
+                                placeholder="Фамилия или имя"
+                            />
+                            <div className="list">
+                                {filteredAuthors.map((author) => (
+                                    <button
+                                        key={author.id}
+                                        className={`list-item ${
+                                            selectedAuthor?.id === author.id
+                                                ? "active"
+                                                : ""
+                                        }`}
+                                        type="button"
+                                        onClick={() => handleAuthorSelect(author)}
+                                    >
+                                        <span>{getAuthorName(author)}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        <div>
+                            <h3 className="subheading">Профиль автора</h3>
+                            {selectedAuthor ? (
+                                <div className="author-card">
+                                    <SafeImage
+                                        src={selectedAuthor.photo_url}
+                                        alt={getAuthorName(selectedAuthor)}
+                                        className="avatar"
+                                    />
+                                    <div>
+                                        <p className="author-name">
+                                            {getAuthorName(selectedAuthor)}
+                                        </p>
+                                        {selectedAuthor.bio && (
+                                            <p className="item-meta">
+                                                {selectedAuthor.bio}
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
+                            ) : (
+                                <p className="status-line">
+                                    Выберите автора для просмотра профиля.
+                                </p>
+                            )}
+                            <h3 className="subheading">
+                                Книги, связанные с автором
+                            </h3>
+                            {authorBooksLoading && (
+                                <p className="status-line">Загрузка...</p>
+                            )}
+                            {!authorBooksLoading &&
+                                authorBooks.length === 0 && (
+                                    <p className="status-line">Нет данных</p>
+                                )}
+                            <div className="stack">
+                                {authorBooks.map((book) => (
+                                    <div key={book.id} className="mini-card">
+                                        <span>{book.title}</span>
+                                        {isAdmin && "location" in book && (
+                                            <span className="item-meta">
+                                                {formatLocation(
+                                                    (book as BookInternal)
+                                                        .location
+                                                )}
+                                            </span>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            )}
+
+            {activeTab === "profile" && (
+                <section className="panel">
+                    <div className="panel-header">
+                        <div>
+                            <h2>Личный кабинет</h2>
+                            <p className="results-caption">
+                                Управляйте своим аккаунтом и доступами.
+                            </p>
+                        </div>
+                    </div>
+                    {!token && (
+                        <p className="status-line">
+                            Чтобы войти в личный кабинет, авторизуйтесь.
+                        </p>
+                    )}
+                    {token && user && (
+                        <div className="profile-grid">
+                            <div>
+                                <h3>Профиль</h3>
+                                <div className="form-grid">
+                                    <label className="field-label">
+                                        Логин
+                                        <input
+                                            className="text-input"
+                                            value={profileDraft.login}
+                                            onChange={(event) =>
+                                                setProfileDraft((prev) => ({
+                                                    ...prev,
+                                                    login: event.target.value,
+                                                }))
+                                            }
+                                            disabled={!isAdmin}
+                                        />
+                                    </label>
+                                    <label className="field-label">
+                                        Имя
+                                        <input
+                                            className="text-input"
+                                            value={profileDraft.first_name}
+                                            onChange={(event) =>
+                                                setProfileDraft((prev) => ({
+                                                    ...prev,
+                                                    first_name:
+                                                        event.target.value,
+                                                }))
+                                            }
+                                            disabled={!isAdmin}
+                                        />
+                                    </label>
+                                    <label className="field-label">
+                                        Фамилия
+                                        <input
+                                            className="text-input"
+                                            value={profileDraft.last_name}
+                                            onChange={(event) =>
+                                                setProfileDraft((prev) => ({
+                                                    ...prev,
+                                                    last_name:
+                                                        event.target.value,
+                                                }))
+                                            }
+                                            disabled={!isAdmin}
+                                        />
+                                    </label>
+                                    <label className="field-label">
+                                        Отчество
+                                        <input
+                                            className="text-input"
+                                            value={profileDraft.middle_name}
+                                            onChange={(event) =>
+                                                setProfileDraft((prev) => ({
+                                                    ...prev,
+                                                    middle_name:
+                                                        event.target.value,
+                                                }))
+                                            }
+                                            disabled={!isAdmin}
+                                        />
+                                    </label>
+                                    <label className="field-label">
+                                        Email
+                                        <input
+                                            className="text-input"
+                                            value={profileDraft.email}
+                                            onChange={(event) =>
+                                                setProfileDraft((prev) => ({
+                                                    ...prev,
+                                                    email: event.target.value,
+                                                }))
+                                            }
+                                            disabled={!isAdmin}
+                                        />
+                                    </label>
+                                    <label className="field-label">
+                                        Новый пароль
+                                        <input
+                                            className="text-input"
+                                            type="password"
+                                            value={profileDraft.password}
+                                            onChange={(event) =>
+                                                setProfileDraft((prev) => ({
+                                                    ...prev,
+                                                    password:
+                                                        event.target.value,
+                                                }))
+                                            }
+                                            disabled={!isAdmin}
+                                        />
+                                    </label>
+                                    {isAdmin && (
+                                        <label className="field-label checkbox">
+                                            <input
+                                                type="checkbox"
+                                                checked={profileDraft.is_active}
+                                                onChange={(event) =>
+                                                    setProfileDraft((prev) => ({
+                                                        ...prev,
+                                                        is_active:
+                                                            event.target.checked,
+                                                    }))
+                                                }
+                                            />
+                                            Активен
+                                        </label>
+                                    )}
+                                </div>
+                                {profileError && (
+                                    <p className="error-banner">
+                                        {profileError}
+                                    </p>
+                                )}
+                                {isAdmin && (
+                                    <button
+                                        className="primary-button"
+                                        type="button"
+                                        onClick={handleProfileSave}
+                                        disabled={profileSaving}
+                                    >
+                                        {profileSaving
+                                            ? "Сохранение..."
+                                            : "Сохранить изменения"}
+                                    </button>
+                                )}
+                            </div>
+                            <div>
+                                <h3>Роли</h3>
+                                <div className="tag-list">
+                                    {user.roles.length ? (
+                                        user.roles.map((role) => (
+                                            <span key={role.code} className="tag">
+                                                {role.name}
+                                            </span>
+                                        ))
+                                    ) : (
+                                        <span className="status-line">
+                                            Нет данных
+                                        </span>
+                                    )}
+                                </div>
+                                {isAdmin && (
+                                    <>
+                                        <h3>Админ-инструменты</h3>
+                                        <div className="stack">
+                                            <button
+                                                className="ghost-button"
+                                                type="button"
+                                                onClick={() =>
+                                                    setIsPublisherModalOpen(true)
+                                                }
+                                            >
+                                                Создать издательство
+                                            </button>
+                                            <button
+                                                className="ghost-button"
+                                                type="button"
+                                                onClick={() =>
+                                                    setIsLocationModalOpen(true)
+                                                }
+                                            >
+                                                Создать локацию
+                                            </button>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </section>
+            )}
+
+            {isLoginOpen && (
+                <div className="modal-backdrop">
+                    <div className="modal">
+                        <div className="modal-header">
+                            <h3>Вход</h3>
+                            <button
+                                className="ghost-button"
+                                type="button"
+                                onClick={() => setIsLoginOpen(false)}
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <form className="modal-body" onSubmit={handleLoginSubmit}>
+                            <label className="field-label">
+                                Логин
+                                <input
+                                    className="text-input"
+                                    value={loginDraft.login}
+                                    onChange={(event) =>
+                                        setLoginDraft((prev) => ({
+                                            ...prev,
+                                            login: event.target.value,
+                                        }))
+                                    }
+                                    required
+                                />
+                            </label>
+                            <label className="field-label">
+                                Пароль
+                                <input
+                                    className="text-input"
+                                    type="password"
+                                    value={loginDraft.password}
+                                    onChange={(event) =>
+                                        setLoginDraft((prev) => ({
+                                            ...prev,
+                                            password: event.target.value,
+                                        }))
+                                    }
+                                    required
+                                />
+                            </label>
+                            {authError && (
+                                <p className="error-banner">{authError}</p>
+                            )}
+                            <div className="modal-footer">
+                                <button className="primary-button" type="submit">
+                                    Войти
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {isBookModalOpen && (
+                <div className="modal-backdrop">
+                    <div className="modal modal-wide">
+                        <div className="modal-header">
+                            <h3>Новая книга</h3>
+                            <button
+                                className="ghost-button"
+                                type="button"
+                                onClick={() => setIsBookModalOpen(false)}
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <div className="modal-body">
+                            <div className="form-grid">
+                                <label className="field-label">
+                                    Название
+                                    <input
+                                        className="text-input"
+                                        value={bookDraft.title}
+                                        onChange={(event) =>
+                                            setBookDraft((prev) => ({
+                                                ...prev,
+                                                title: event.target.value,
+                                            }))
+                                        }
+                                    />
+                                </label>
+                                <label className="field-label">
+                                    Издательство
+                                    <div className="inline-actions">
+                                        <select
+                                            className="text-input"
+                                            value={bookDraft.publisherId}
+                                            onChange={(event) =>
+                                                setBookDraft((prev) => ({
+                                                    ...prev,
+                                                    publisherId:
+                                                        event.target.value,
+                                                }))
+                                            }
+                                        >
+                                            <option value="">
+                                                Без издательства
+                                            </option>
+                                            {publishers.map((publisher) => (
+                                                <option
+                                                    key={publisher.id}
+                                                    value={publisher.id}
+                                                >
+                                                    {publisher.name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <button
+                                            className="ghost-button"
+                                            type="button"
+                                            onClick={() =>
+                                                setIsPublisherModalOpen(true)
+                                            }
+                                        >
+                                            Создать
+                                        </button>
+                                    </div>
+                                </label>
+                                <label className="field-label">
+                                    Год
+                                    <input
+                                        className="text-input"
+                                        value={bookDraft.year}
+                                        onChange={(event) =>
+                                            setBookDraft((prev) => ({
+                                                ...prev,
+                                                year: event.target.value,
+                                            }))
+                                        }
+                                    />
+                                </label>
+                                <label className="field-label">
+                                    ID локации
+                                    <input
+                                        className="text-input"
+                                        value={bookDraft.locationId}
+                                        onChange={(event) =>
+                                            setBookDraft((prev) => ({
+                                                ...prev,
+                                                locationId: event.target.value,
+                                            }))
+                                        }
+                                        placeholder="UUID"
+                                    />
+                                </label>
+                                <label className="field-label">
+                                    Фабричный штрихкод
+                                    <input
+                                        className="text-input"
+                                        value={bookDraft.factoryBarcode}
+                                        onChange={(event) =>
+                                            setBookDraft((prev) => ({
+                                                ...prev,
+                                                factoryBarcode:
+                                                    event.target.value,
+                                            }))
+                                        }
+                                    />
+                                </label>
+                                <label className="field-label">
+                                    Обложка (URL)
+                                    <input
+                                        className="text-input"
+                                        value={bookDraft.coverUrl}
+                                        onChange={(event) =>
+                                            setBookDraft((prev) => ({
+                                                ...prev,
+                                                coverUrl: event.target.value,
+                                            }))
+                                        }
+                                    />
+                                </label>
+                                <label className="field-label full">
+                                    Описание
+                                    <textarea
+                                        className="text-area"
+                                        value={bookDraft.description}
+                                        onChange={(event) =>
+                                            setBookDraft((prev) => ({
+                                                ...prev,
+                                                description:
+                                                    event.target.value,
+                                            }))
+                                        }
+                                    />
+                                </label>
+                            </div>
+                            <div className="list-block">
+                                <div className="list-block-header">
+                                    <h4>Произведения</h4>
+                                    <div className="inline-actions">
+                                        <button
+                                            className="ghost-button"
+                                            type="button"
+                                            onClick={() =>
+                                                setIsWorkModalOpen(true)
+                                            }
+                                        >
+                                            Создать произведение
+                                        </button>
+                                        <button
+                                            className="ghost-button"
+                                            type="button"
+                                            onClick={() =>
+                                                setIsAuthorModalOpen(true)
+                                            }
+                                        >
+                                            Создать автора
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="checkbox-grid">
+                                    {works.map((work) => (
+                                        <label
+                                            key={work.id}
+                                            className="checkbox-item"
+                                        >
+                                            <input
+                                                type="checkbox"
+                                                checked={bookDraft.workIds.includes(
+                                                    work.id
+                                                )}
+                                                onChange={(event) => {
+                                                    const checked =
+                                                        event.target.checked
+                                                    setBookDraft((prev) => ({
+                                                        ...prev,
+                                                        workIds: checked
+                                                            ? [
+                                                                  ...prev.workIds,
+                                                                  work.id,
+                                                              ]
+                                                            : prev.workIds.filter(
+                                                                  (id) =>
+                                                                      id !==
+                                                                      work.id
+                                                              ),
+                                                    }))
+                                                }}
+                                            />
+                                            <span>
+                                                {work.title}
+                                                <small className="item-meta">
+                                                    {work.authors
+                                                        .map(getAuthorName)
+                                                        .join(", ")}
+                                                </small>
+                                            </span>
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+                            {bookError && (
+                                <p className="error-banner">{bookError}</p>
+                            )}
+                        </div>
+                        <div className="modal-footer">
+                            <button
+                                className="primary-button"
+                                type="button"
+                                onClick={handleCreateBook}
+                                disabled={bookSaving}
+                            >
+                                {bookSaving ? "Сохранение..." : "Создать книгу"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isWorkModalOpen && (
+                <div className="modal-backdrop">
+                    <div className="modal">
+                        <div className="modal-header">
+                            <h3>Новое произведение</h3>
+                            <button
+                                className="ghost-button"
+                                type="button"
+                                onClick={() => setIsWorkModalOpen(false)}
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <div className="modal-body">
+                            <label className="field-label">
+                                Название
+                                <input
+                                    className="text-input"
+                                    value={workDraft.title}
+                                    onChange={(event) =>
+                                        setWorkDraft((prev) => ({
+                                            ...prev,
+                                            title: event.target.value,
+                                        }))
+                                    }
+                                />
+                            </label>
+                            <label className="field-label">
+                                Год
+                                <input
+                                    className="text-input"
+                                    value={workDraft.year}
+                                    onChange={(event) =>
+                                        setWorkDraft((prev) => ({
+                                            ...prev,
+                                            year: event.target.value,
+                                        }))
+                                    }
+                                />
+                            </label>
+                            <label className="field-label">
+                                Описание
+                                <textarea
+                                    className="text-area"
+                                    value={workDraft.description}
+                                    onChange={(event) =>
+                                        setWorkDraft((prev) => ({
+                                            ...prev,
+                                            description: event.target.value,
+                                        }))
+                                    }
+                                />
+                            </label>
+                            <div className="list-block">
+                                <div className="list-block-header">
+                                    <h4>Авторы</h4>
+                                    <button
+                                        className="ghost-button"
+                                        type="button"
+                                        onClick={() =>
+                                            setIsAuthorModalOpen(true)
+                                        }
+                                    >
+                                        Создать автора
+                                    </button>
+                                </div>
+                                <div className="checkbox-grid">
+                                    {authors.map((author) => (
+                                        <label
+                                            key={author.id}
+                                            className="checkbox-item"
+                                        >
+                                            <input
+                                                type="checkbox"
+                                                checked={workDraft.authorIds.includes(
+                                                    author.id
+                                                )}
+                                                onChange={(event) => {
+                                                    const checked =
+                                                        event.target.checked
+                                                    setWorkDraft((prev) => ({
+                                                        ...prev,
+                                                        authorIds: checked
+                                                            ? [
+                                                                  ...prev.authorIds,
+                                                                  author.id,
+                                                              ]
+                                                            : prev.authorIds.filter(
+                                                                  (id) =>
+                                                                      id !==
+                                                                      author.id
+                                                              ),
+                                                    }))
+                                                }}
+                                            />
+                                            <span>{getAuthorName(author)}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+                            {workError && (
+                                <p className="error-banner">{workError}</p>
+                            )}
+                        </div>
+                        <div className="modal-footer">
+                            <button
+                                className="primary-button"
+                                type="button"
+                                onClick={handleCreateWork}
+                                disabled={workSaving}
+                            >
+                                {workSaving
+                                    ? "Сохранение..."
+                                    : "Создать произведение"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isAuthorModalOpen && (
+                <div className="modal-backdrop">
+                    <div className="modal">
+                        <div className="modal-header">
+                            <h3>Новый автор</h3>
+                            <button
+                                className="ghost-button"
+                                type="button"
+                                onClick={() => setIsAuthorModalOpen(false)}
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <div className="modal-body">
+                            <div className="form-grid">
+                                <label className="field-label">
+                                    Фамилия
+                                    <input
+                                        className="text-input"
+                                        value={authorDraft.lastName}
+                                        onChange={(event) =>
+                                            setAuthorDraft((prev) => ({
+                                                ...prev,
+                                                lastName: event.target.value,
+                                            }))
+                                        }
+                                    />
+                                </label>
+                                <label className="field-label">
+                                    Имя
+                                    <input
+                                        className="text-input"
+                                        value={authorDraft.firstName}
+                                        onChange={(event) =>
+                                            setAuthorDraft((prev) => ({
+                                                ...prev,
+                                                firstName: event.target.value,
+                                            }))
+                                        }
+                                    />
+                                </label>
+                                <label className="field-label">
+                                    Отчество
+                                    <input
+                                        className="text-input"
+                                        value={authorDraft.middleName}
+                                        onChange={(event) =>
+                                            setAuthorDraft((prev) => ({
+                                                ...prev,
+                                                middleName: event.target.value,
+                                            }))
+                                        }
+                                    />
+                                </label>
+                                <label className="field-label">
+                                    Дата рождения
+                                    <input
+                                        className="text-input"
+                                        type="date"
+                                        value={authorDraft.birthDate}
+                                        onChange={(event) =>
+                                            setAuthorDraft((prev) => ({
+                                                ...prev,
+                                                birthDate: event.target.value,
+                                            }))
+                                        }
+                                    />
+                                </label>
+                                <label className="field-label">
+                                    Дата смерти
+                                    <input
+                                        className="text-input"
+                                        type="date"
+                                        value={authorDraft.deathDate}
+                                        onChange={(event) =>
+                                            setAuthorDraft((prev) => ({
+                                                ...prev,
+                                                deathDate: event.target.value,
+                                            }))
+                                        }
+                                    />
+                                </label>
+                                <label className="field-label">
+                                    Фото (URL)
+                                    <input
+                                        className="text-input"
+                                        value={authorDraft.photoUrl}
+                                        onChange={(event) =>
+                                            setAuthorDraft((prev) => ({
+                                                ...prev,
+                                                photoUrl: event.target.value,
+                                            }))
+                                        }
+                                    />
+                                </label>
+                                <label className="field-label full">
+                                    Биография
+                                    <textarea
+                                        className="text-area"
+                                        value={authorDraft.bio}
+                                        onChange={(event) =>
+                                            setAuthorDraft((prev) => ({
+                                                ...prev,
+                                                bio: event.target.value,
+                                            }))
+                                        }
+                                    />
+                                </label>
+                            </div>
+                            {authorError && (
+                                <p className="error-banner">{authorError}</p>
+                            )}
+                        </div>
+                        <div className="modal-footer">
+                            <button
+                                className="primary-button"
+                                type="button"
+                                onClick={handleCreateAuthor}
+                                disabled={authorSaving}
+                            >
+                                {authorSaving ? "Сохранение..." : "Создать автора"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isPublisherModalOpen && (
+                <div className="modal-backdrop">
+                    <div className="modal">
+                        <div className="modal-header">
+                            <h3>Новое издательство</h3>
+                            <button
+                                className="ghost-button"
+                                type="button"
+                                onClick={() => setIsPublisherModalOpen(false)}
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <div className="modal-body">
+                            <label className="field-label">
+                                Название
+                                <input
+                                    className="text-input"
+                                    value={publisherDraft.name}
+                                    onChange={(event) =>
+                                        setPublisherDraft((prev) => ({
+                                            ...prev,
+                                            name: event.target.value,
+                                        }))
+                                    }
+                                />
+                            </label>
+                            <label className="field-label">
+                                Логотип (URL)
+                                <input
+                                    className="text-input"
+                                    value={publisherDraft.logoUrl}
+                                    onChange={(event) =>
+                                        setPublisherDraft((prev) => ({
+                                            ...prev,
+                                            logoUrl: event.target.value,
+                                        }))
+                                    }
+                                />
+                            </label>
+                            <label className="field-label">
+                                Сайт
+                                <input
+                                    className="text-input"
+                                    value={publisherDraft.webUrl}
+                                    onChange={(event) =>
+                                        setPublisherDraft((prev) => ({
+                                            ...prev,
+                                            webUrl: event.target.value,
+                                        }))
+                                    }
+                                />
+                            </label>
+                            {publisherError && (
+                                <p className="error-banner">{publisherError}</p>
+                            )}
+                        </div>
+                        <div className="modal-footer">
+                            <button
+                                className="primary-button"
+                                type="button"
+                                onClick={handleCreatePublisher}
+                                disabled={publisherSaving}
+                            >
+                                {publisherSaving
+                                    ? "Сохранение..."
+                                    : "Создать издательство"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isLocationModalOpen && (
+                <div className="modal-backdrop">
+                    <div className="modal">
+                        <div className="modal-header">
+                            <h3>Новая локация</h3>
+                            <button
+                                className="ghost-button"
+                                type="button"
+                                onClick={() => setIsLocationModalOpen(false)}
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <div className="modal-body">
+                            <label className="field-label">
+                                Тип
+                                <select
+                                    className="text-input"
+                                    value={locationDraft.type}
+                                    onChange={(event) =>
+                                        setLocationDraft((prev) => ({
+                                            ...prev,
+                                            type: event.target.value,
+                                        }))
+                                    }
+                                >
+                                    <option value="">Выберите тип</option>
+                                    <option value="building">Здание</option>
+                                    <option value="room">Комната</option>
+                                    <option value="cabinet">Кабинет</option>
+                                    <option value="shelf">Полка</option>
+                                </select>
+                            </label>
+                            <label className="field-label">
+                                Название
+                                <input
+                                    className="text-input"
+                                    value={locationDraft.name}
+                                    onChange={(event) =>
+                                        setLocationDraft((prev) => ({
+                                            ...prev,
+                                            name: event.target.value,
+                                        }))
+                                    }
+                                />
+                            </label>
+                            <label className="field-label">
+                                Родитель (UUID)
+                                <input
+                                    className="text-input"
+                                    value={locationDraft.parentId}
+                                    onChange={(event) =>
+                                        setLocationDraft((prev) => ({
+                                            ...prev,
+                                            parentId: event.target.value,
+                                        }))
+                                    }
+                                />
+                            </label>
+                            <label className="field-label">
+                                Адрес
+                                <input
+                                    className="text-input"
+                                    value={locationDraft.address}
+                                    onChange={(event) =>
+                                        setLocationDraft((prev) => ({
+                                            ...prev,
+                                            address: event.target.value,
+                                        }))
+                                    }
+                                />
+                            </label>
+                            <label className="field-label">
+                                Описание
+                                <textarea
+                                    className="text-area"
+                                    value={locationDraft.description}
+                                    onChange={(event) =>
+                                        setLocationDraft((prev) => ({
+                                            ...prev,
+                                            description: event.target.value,
+                                        }))
+                                    }
+                                />
+                            </label>
+                            {locationError && (
+                                <p className="error-banner">{locationError}</p>
+                            )}
+                        </div>
+                        <div className="modal-footer">
+                            <button
+                                className="primary-button"
+                                type="button"
+                                onClick={handleCreateLocation}
+                                disabled={locationSaving}
+                            >
+                                {locationSaving
+                                    ? "Сохранение..."
+                                    : "Создать локацию"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    )
 }

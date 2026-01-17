@@ -4,6 +4,7 @@ interface Props {
     onSearch: (search: string) => void
     maxLength?: number
     onLimitExceeded?: (limit: number) => void
+    onReset?: () => void
     isLoading?: boolean
 }
 
@@ -11,6 +12,7 @@ export function SearchBar({
     onSearch,
     maxLength,
     onLimitExceeded,
+    onReset,
     isLoading = false,
 }: Props) {
     const [value, setValue] = useState("")
@@ -39,6 +41,17 @@ export function SearchBar({
             />
             <button type="submit" disabled={isLoading}>
                 Найти
+            </button>
+            <button
+                className="ghost-button"
+                type="button"
+                onClick={() => {
+                    setValue("")
+                    onReset?.()
+                }}
+                disabled={isLoading || value.length === 0}
+            >
+                Сброс
             </button>
         </form>
     )
