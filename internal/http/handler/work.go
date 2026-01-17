@@ -29,7 +29,7 @@ type createWorkRequest struct {
 func (h *WorkHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req createWorkRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		log.Printf("failed to decode request body: %s", err)
+		log.Printf("error decoding create work request: %v", err)
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
@@ -69,6 +69,7 @@ func (h *WorkHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.Service.Update(r.Context(), id, req); err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
+			log.Printf("work %s not found: %v", idStr, err)
 			http.Error(w, "work not found", http.StatusNotFound)
 			return
 		}
@@ -90,6 +91,11 @@ func (h *WorkHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.Service.Delete(r.Context(), id); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			log.Printf("work %s not found: %v", idStr, err)
+			http.Error(w, "work not found", http.StatusNotFound)
+			return
+		}
 		log.Printf("Failed to delete work: %s", err)
 		http.Error(w, "failed to delete work", http.StatusInternalServerError)
 		return

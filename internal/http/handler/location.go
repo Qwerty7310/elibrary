@@ -3,6 +3,7 @@ package handler
 import (
 	"elibrary/internal/domain"
 	"elibrary/internal/service"
+	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
@@ -20,23 +21,86 @@ func NewLocationHandler(service *service.LocationService) *LocationHandler {
 }
 
 type createLocationRequest struct {
-	ParentID    *uuid.UUID          `json:"parent_id,omitempty"`
-	Type        domain.LocationType `json:"type"`
-	Name        string              `json:"name"`
-	Barcode     string              `json:"barcode"`
-	Address     *string             `json:"address,omitempty"`
-	Description *string             `json:"description,omitempty"`
+	ParentID    *uuid.UUID `json:"parent_id,omitempty"`
+	Type        string     `json:"type"`
+	Name        string     `json:"name"`
+	Address     *string    `json:"address,omitempty"`
+	Description *string    `json:"description,omitempty"`
 }
 
-//func (h *LocationHandler) Create(w http.ResponseWriter, r *http.Request) {
-//
-//}
+func (h *LocationHandler) Create(w http.ResponseWriter, r *http.Request) {
+	var req createLocationRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("error decoding create location request: %v", err)
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	locType, err := domain.ParseLocationType(req.Type)
+
+	location := domain.Location{
+		ParentID:    req.ParentID,
+		Type:        locType,
+		Name:        req.Name,
+		Address:     req.Address,
+		Description: req.Description,
+	}
+
+	created, err := h.Service.Create(r.Context(), location)
+	if err != nil {
+		if errors.Is(err, domain.ErrBarcodeExists) {
+			log.Printf("location barcode already exists: %v", err)
+			http.Error(w, "barcode already exists", http.StatusConflict)
+			return
+		}
+		log.Printf("error creating location: %v", err)
+		http.Error(w, "error creating location", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, created)
+}
+
+type updateLocationRequest = service.UpdateLocationRequest
+
+func (h *LocationHandler) Update(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		log.Printf("invalid id %s: %v", idStr, err)
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	var req updateLocationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("error decoding update location request: %v", err)
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.Service.Update(r.Context(), id, req); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			log.Printf("location %s not found: %v", idStr, err)
+			http.Error(w, "location not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("error updating location: %v", err)
+		http.Error(w, "error updating location", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
 
 func (h *LocationHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
 		log.Printf("error parsing ID %s: %v", idStr, err)
+		http.Error(w, "invalid ID", http.StatusBadRequest)
+		return
 	}
 
 	location, err := h.Service.GetByID(r.Context(), id)
@@ -83,4 +147,27 @@ func (h *LocationHandler) GetByParentID(w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, locations)
+}
+
+func (h *LocationHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		log.Printf("error parsing ID %s: %v", idStr, err)
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.Service.Delete(r.Context(), id); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			log.Printf("location %s not found: %v", idStr, err)
+			http.Error(w, "location not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("error deleting location %s: %v", idStr, err)
+		http.Error(w, "error deleting location", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }

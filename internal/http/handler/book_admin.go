@@ -43,7 +43,7 @@ func (h *BookAdminHandler) Create(w http.ResponseWriter, r *http.Request) {
 	created, err := h.Service.Create(r.Context(), req.Book, req.Works)
 	if err != nil {
 		if errors.Is(err, domain.ErrBarcodeExists) {
-			log.Printf("Failed to create book: %v", err)
+			log.Printf("book barcode already exists: %v", err)
 			http.Error(w, "barcode already exists", http.StatusConflict)
 			return
 		}
