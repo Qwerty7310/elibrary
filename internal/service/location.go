@@ -80,6 +80,7 @@ func (s *LocationService) Update(ctx context.Context, id uuid.UUID, updates Upda
 			if errors.Is(err, repository.ErrNotFound) {
 				return ErrParentNotFound
 			}
+			return err
 		}
 
 		if !location.Type.IsChildOf(parent.Type) {

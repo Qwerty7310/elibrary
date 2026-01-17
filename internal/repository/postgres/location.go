@@ -22,8 +22,8 @@ func NewLocationRepository(db *pgxpool.Pool) *LocationRepository {
 
 func (r *LocationRepository) Create(ctx context.Context, location domain.Location) error {
 	_, err := r.db.Exec(ctx, `
-		INSERT INTO locations (id, parent_id, type, name, barcode, address, description,)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO locations (id, parent_id, type, name, barcode, address, description)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 	`,
 		location.ID,
 		location.ParentID,
@@ -171,6 +171,7 @@ func (r *LocationRepository) GetByBarcode(ctx context.Context, barcode string) (
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, repository.ErrNotFound
 		}
+		return nil, err
 	}
 
 	return &location, nil

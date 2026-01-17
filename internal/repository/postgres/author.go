@@ -83,7 +83,7 @@ func (r *AuthorRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.A
 		SELECT id, last_name, first_name, middle_name, birth_date, death_date, bio, photo_url, created_at, updated_at
 		FROM authors
 		WHERE id = $1
-	`).Scan(
+	`, id).Scan(
 		&author.ID,
 		&author.LastName,
 		&author.FirstName,

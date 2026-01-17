@@ -82,6 +82,8 @@ func (s *UserService) Update(ctx context.Context, id uuid.UUID, updates UpdateUs
 		if exist != nil && exist.ID != user.ID {
 			return domain.ErrLoginExists
 		}
+
+		user.Login = login
 	}
 	if updates.FirstName != nil {
 		if strings.TrimSpace(*updates.FirstName) == "" {

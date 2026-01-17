@@ -123,7 +123,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 		// ---------- location ----------
 		r.Route("/locations", func(r chi.Router) {
 			r.Get("/{id}", locationHandler.GetByID)
-			r.Get("/child/{id}", locationHandler.GetByParentID)
+			r.Get("/child/{id}/{type}", locationHandler.GetByParentID)
 		})
 
 		// ---------- admin ----------

@@ -38,6 +38,11 @@ func (h *LocationHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	locType, err := domain.ParseLocationType(req.Type)
+	if err != nil {
+		log.Printf("invalid location type: %v", err)
+		http.Error(w, "invalid location type", http.StatusBadRequest)
+		return
+	}
 
 	location := domain.Location{
 		ParentID:    req.ParentID,
