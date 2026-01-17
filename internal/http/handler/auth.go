@@ -32,9 +32,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{
+	writeJSON(w, http.StatusOK, map[string]string{
 		"access_token": token,
 	})
-
-	w.Header().Set("Content-Type", "application/json")
 }

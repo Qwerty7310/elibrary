@@ -47,7 +47,7 @@ func (h *BookAdminHandler) Create(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "barcode already exists", http.StatusConflict)
 			return
 		}
-		log.Printf("Failed to create work: %v", err)
+		log.Printf("failed to create book: %v", err)
 		http.Error(w, "failed to create book", http.StatusInternalServerError)
 		return
 	}

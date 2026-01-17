@@ -36,7 +36,7 @@ func (r *LocationRepository) Create(ctx context.Context, location domain.Locatio
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return errors.New("barcode already exists")
+			return domain.ErrBarcodeExists
 		}
 		return err
 	}

@@ -70,6 +70,11 @@ func (h *UserHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	created, err := h.Service.Create(r.Context(), user)
 	if err != nil {
+		if errors.Is(err, domain.ErrLoginExists) {
+			log.Printf("login already exists: %v", err)
+			http.Error(w, "login already exists", http.StatusConflict)
+			return
+		}
 		log.Printf("error creating user: %v", err)
 		http.Error(w, "error creating user", http.StatusInternalServerError)
 		return
@@ -100,6 +105,11 @@ func (h *UserHandler) Update(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, domain.ErrNotFound) {
 			log.Printf("user %s not found: %v", id, err)
 			http.Error(w, "user not found", http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, domain.ErrLoginExists) {
+			log.Printf("login already exists: %v", err)
+			http.Error(w, "login already exists", http.StatusConflict)
 			return
 		}
 		log.Printf("error updating user %s: %v", id, err)

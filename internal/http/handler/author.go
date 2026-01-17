@@ -79,7 +79,7 @@ func (h *AuthorHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var req updateAuthorRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		log.Printf("failed to decode update author request: %s", err)
-		http.Error(w, "invalid id", http.StatusBadRequest)
+		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
 
@@ -125,8 +125,13 @@ func (h *AuthorHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 
 	author, err := h.Service.GetByID(r.Context(), id)
 	if err != nil {
-		log.Printf("Error getting author %s: %v", idStr, err)
-		http.Error(w, "author not found", http.StatusNotFound)
+		if errors.Is(err, domain.ErrNotFound) {
+			log.Printf("author %s not found: %v", idStr, err)
+			http.Error(w, "author not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("error getting author %s: %v", idStr, err)
+		http.Error(w, "error getting author", http.StatusInternalServerError)
 		return
 	}
 

@@ -143,12 +143,15 @@ func (r *UserRepository) Delete(ctx context.Context, id uuid.UUID) error {
 		return err
 	}
 
-	_, err = tx.Exec(ctx, `
+	res, err := tx.Exec(ctx, `
 		DELETE FROM users
 		WHERE id = $1
 	`, id)
 	if err != nil {
 		return err
+	}
+	if res.RowsAffected() == 0 {
+		return repository.ErrNotFound
 	}
 
 	return tx.Commit(ctx)

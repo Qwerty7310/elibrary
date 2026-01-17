@@ -143,7 +143,18 @@ func (h *LocationHandler) GetByParentID(w http.ResponseWriter, r *http.Request) 
 	locations, err := h.Service.GetByTypeParentID(r.Context(), locType, id)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
+			log.Printf("location %s not found: %v", idStr, err)
 			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, service.ErrParentNotFound) {
+			log.Printf("parent %s not found: %v", idStr, err)
+			http.Error(w, "parent not found", http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, service.ErrInvalidLocationType) {
+			log.Printf("invalid location type %s: %v", locType, err)
+			http.Error(w, "invalid location type", http.StatusBadRequest)
 			return
 		}
 		log.Printf("error getting locations %s: %v", idStr, err)

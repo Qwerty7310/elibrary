@@ -84,6 +84,8 @@ func (h *PublisherHandler) Update(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to update publisher", http.StatusInternalServerError)
 		return
 	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *PublisherHandler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -115,8 +117,13 @@ func (h *PublisherHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 
 	publisher, err := h.Service.GetByID(r.Context(), id)
 	if err != nil {
-		log.Printf("Error getting publisher %s: %v", idStr, err)
-		http.Error(w, "publisher not found", http.StatusNotFound)
+		if errors.Is(err, domain.ErrNotFound) {
+			log.Printf("publisher %s not found: %v", idStr, err)
+			http.Error(w, "publisher not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("error getting publisher %s: %v", idStr, err)
+		http.Error(w, "error getting publisher", http.StatusInternalServerError)
 		return
 	}
 
