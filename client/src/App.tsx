@@ -209,6 +209,7 @@ export default function App() {
 
     const [authorQuery, setAuthorQuery] = useState("")
     const [selectedAuthor, setSelectedAuthor] = useState<Author | null>(null)
+    const [isAuthorInfoOpen, setIsAuthorInfoOpen] = useState(false)
     const [authorBooks, setAuthorBooks] = useState<BookPublic[]>([])
     const [authorBooksLoading, setAuthorBooksLoading] = useState(false)
 
@@ -219,6 +220,11 @@ export default function App() {
     const [bookError, setBookError] = useState<string | null>(null)
     const [bookSaving, setBookSaving] = useState(false)
     const [coverPreview, setCoverPreview] = useState<string | null>(null)
+    const [isWorksPickerOpen, setIsWorksPickerOpen] = useState(true)
+    const [selectedBuildingId, setSelectedBuildingId] = useState("")
+    const [selectedRoomId, setSelectedRoomId] = useState("")
+    const [selectedCabinetId, setSelectedCabinetId] = useState("")
+    const [selectedShelfId, setSelectedShelfId] = useState("")
 
     const [isWorkModalOpen, setIsWorkModalOpen] = useState(false)
     const [workDraft, setWorkDraft] = useState<WorkDraft>(emptyWorkDraft)
@@ -338,7 +344,13 @@ export default function App() {
 
     useEffect(() => {
         if (isBookModalOpen && token) {
-            ensureLocationsByType("shelf")
+            loadBuildingLocations()
+            setSelectedBuildingId("")
+            setSelectedRoomId("")
+            setSelectedCabinetId("")
+            setSelectedShelfId("")
+            setBookDraft((prev) => ({...prev, locationId: ""}))
+            setIsWorksPickerOpen(true)
         }
     }, [isBookModalOpen, token])
 
@@ -372,14 +384,24 @@ export default function App() {
         )
     }, [publisherQuery, publishers])
 
-    const shelfLocations = useMemo(
-        () => locationByType.shelf ?? [],
-        [locationByType]
-    )
-
     const buildingLocations = useMemo(
         () => locationByType.building ?? [],
         [locationByType]
+    )
+
+    const roomLocations = useMemo(
+        () => (selectedBuildingId ? locationChildren[selectedBuildingId] ?? [] : []),
+        [locationChildren, selectedBuildingId]
+    )
+
+    const cabinetLocations = useMemo(
+        () => (selectedRoomId ? locationChildren[selectedRoomId] ?? [] : []),
+        [locationChildren, selectedRoomId]
+    )
+
+    const shelfLocationsForSelection = useMemo(
+        () => (selectedCabinetId ? locationChildren[selectedCabinetId] ?? [] : []),
+        [locationChildren, selectedCabinetId]
     )
 
     function getParentType(type: string) {
@@ -497,6 +519,7 @@ export default function App() {
 
     async function handleAuthorSelect(author: AuthorSummary) {
         setSelectedAuthor(null)
+        setIsAuthorInfoOpen(true)
         setAuthorBooks([])
         setAuthorBooksLoading(true)
         try {
@@ -693,11 +716,23 @@ export default function App() {
             }))
             setLocationDraft(emptyLocationDraft)
             setIsLocationModalOpen(false)
-            if (isBookModalOpen && created.type === "shelf") {
-                setBookDraft((prev) => ({
-                    ...prev,
-                    locationId: created.id,
-                }))
+            if (isBookModalOpen) {
+                if (created.type === "building") {
+                    setSelectedBuildingId(created.id)
+                }
+                if (created.type === "room") {
+                    setSelectedRoomId(created.id)
+                }
+                if (created.type === "cabinet") {
+                    setSelectedCabinetId(created.id)
+                }
+                if (created.type === "shelf") {
+                    setSelectedShelfId(created.id)
+                    setBookDraft((prev) => ({
+                        ...prev,
+                        locationId: created.id,
+                    }))
+                }
             }
             if (created.parent_id) {
                 setLocationChildren((prev) => {
@@ -869,6 +904,28 @@ export default function App() {
         )
     }
 
+    async function loadChildren(
+        parentId: string,
+        childType: string,
+        reset = false
+    ) {
+        if (!parentId) {
+            return
+        }
+        if (locationChildren[parentId] && !reset) {
+            return
+        }
+        try {
+            const data = await getLocationChildren(parentId, childType)
+            setLocationChildren((prev) => ({
+                ...prev,
+                [parentId]: data ?? [],
+            }))
+        } catch {
+            setLocationsError("Не удалось загрузить локации")
+        }
+    }
+
     return (
         <div className="app-shell">
             <header className="top-bar">
@@ -879,10 +936,14 @@ export default function App() {
                 <div className="user-block">
                     {user && token ? (
                         <>
-                            <span className="user-badge">
+                            <button
+                                className="user-badge-button"
+                                type="button"
+                                onClick={() => setActiveTab("profile")}
+                            >
                                 {user.login || "Пользователь"}
                                 {isAdmin ? " · админ" : ""}
-                            </span>
+                            </button>
                             <button
                                 className="ghost-button"
                                 type="button"
@@ -893,7 +954,7 @@ export default function App() {
                         </>
                     ) : (
                         <button
-                            className="primary-button"
+                            className="user-badge-button"
                             type="button"
                             onClick={() => setIsLoginOpen(true)}
                         >
@@ -1153,47 +1214,23 @@ export default function App() {
                                 placeholder="Фамилия или имя"
                             />
                             <div className="list">
-                                {filteredAuthors.map((author) => (
-                                    <button
-                                        key={author.id}
-                                        className={`list-item ${
-                                            selectedAuthor?.id === author.id
-                                                ? "active"
-                                                : ""
-                                        }`}
-                                        type="button"
-                                        onClick={() => handleAuthorSelect(author)}
-                                    >
-                                        <span>{getAuthorName(author)}</span>
-                                    </button>
-                                ))}
+                                    {filteredAuthors.map((author) => (
+                                        <button
+                                            key={author.id}
+                                            className={`list-item ${
+                                                selectedAuthor?.id === author.id
+                                                    ? "active"
+                                                    : ""
+                                            }`}
+                                            type="button"
+                                            onClick={() => handleAuthorSelect(author)}
+                                        >
+                                            <span>{getAuthorName(author)}</span>
+                                        </button>
+                                    ))}
                             </div>
                         </div>
                         <div>
-                            <h3 className="subheading">Профиль автора</h3>
-                            {selectedAuthor ? (
-                                <div className="author-card">
-                                    <SafeImage
-                                        src={selectedAuthor.photo_url}
-                                        alt={getAuthorName(selectedAuthor)}
-                                        className="avatar"
-                                    />
-                                    <div>
-                                        <p className="author-name">
-                                            {getAuthorName(selectedAuthor)}
-                                        </p>
-                                        {selectedAuthor.bio && (
-                                            <p className="item-meta">
-                                                {selectedAuthor.bio}
-                                            </p>
-                                        )}
-                                    </div>
-                                </div>
-                            ) : (
-                                <p className="status-line">
-                                    Выберите автора для просмотра профиля.
-                                </p>
-                            )}
                             <h3 className="subheading">
                                 Книги, связанные с автором
                             </h3>
@@ -1202,8 +1239,8 @@ export default function App() {
                             )}
                             {!authorBooksLoading &&
                                 authorBooks.length === 0 && (
-                                    <p className="status-line">Нет данных</p>
-                                )}
+                                <p className="status-line">Нет данных</p>
+                            )}
                             <div className="stack">
                                 {authorBooks.map((book) => (
                                     <div key={book.id} className="mini-card">
@@ -1302,21 +1339,23 @@ export default function App() {
                             </button>
                         )}
                     </div>
-                    {locationsError && (
+                    {locationsError ? (
                         <p className="error-banner">{locationsError}</p>
+                    ) : (
+                        <div className="location-tree">
+                            {!locationsLoaded && (
+                                <p className="status-line">Загрузка...</p>
+                            )}
+                            {locationsLoaded && buildingLocations.length === 0 && (
+                                <p className="status-line">
+                                    Локаций пока нет.
+                                </p>
+                            )}
+                            {buildingLocations.map((location) =>
+                                renderLocationNode(location)
+                            )}
+                        </div>
                     )}
-                    <div className="location-tree">
-                        {buildingLocations.length === 0 && (
-                            <p className="status-line">
-                                {locationsLoaded
-                                    ? "Пока нет зданий."
-                                    : "Загрузка..."}
-                            </p>
-                        )}
-                        {buildingLocations.map((location) =>
-                            renderLocationNode(location)
-                        )}
-                    </div>
                 </section>
             )}
 
@@ -1429,41 +1468,45 @@ export default function App() {
                                             disabled={!isAdmin}
                                         />
                                     </label>
-                                    {isAdmin && (
-                                        <label className="field-label checkbox">
-                                            <input
-                                                type="checkbox"
-                                                checked={profileDraft.is_active}
-                                                onChange={(event) =>
-                                                    setProfileDraft((prev) => ({
-                                                        ...prev,
-                                                        is_active:
-                                                            event.target.checked,
-                                                    }))
-                                                }
-                                            />
-                                            Активен
-                                        </label>
-                                    )}
-                                </div>
-                                {profileError && (
-                                    <p className="error-banner">
-                                        {profileError}
-                                    </p>
-                                )}
-                                {isAdmin && (
-                                    <button
-                                        className="primary-button"
-                                        type="button"
-                                        onClick={handleProfileSave}
-                                        disabled={profileSaving}
-                                    >
-                                        {profileSaving
-                                            ? "Сохранение..."
-                                            : "Сохранить изменения"}
-                                    </button>
+                                {!isAdmin && (
+                                    <label className="field-label">
+                                        <span>Активен</span>
+                                        <input
+                                            type="checkbox"
+                                            checked={profileDraft.is_active}
+                                            onChange={(event) =>
+                                                setProfileDraft((prev) => ({
+                                                    ...prev,
+                                                    is_active:
+                                                        event.target.checked,
+                                                }))
+                                            }
+                                        />
+                                    </label>
                                 )}
                             </div>
+                            {profileError && (
+                                <p className="error-banner">
+                                    {profileError}
+                                </p>
+                            )}
+                            <div
+                                className={`profile-actions ${
+                                    !isAdmin ? "profile-actions-spaced" : ""
+                                }`}
+                            >
+                                <button
+                                    className="primary-button"
+                                    type="button"
+                                    onClick={handleProfileSave}
+                                    disabled={profileSaving || !isAdmin}
+                                >
+                                    {profileSaving
+                                        ? "Сохранение..."
+                                        : "Сохранить изменения"}
+                                </button>
+                            </div>
+                        </div>
                             <div>
                                 <h3>Роли</h3>
                                 <div className="tag-list">
@@ -1490,7 +1533,7 @@ export default function App() {
                                                     setIsPublisherModalOpen(true)
                                                 }
                                             >
-                                                +
+                                                Добавить издательство
                                             </button>
                                             <button
                                                 className="ghost-button"
@@ -1499,7 +1542,7 @@ export default function App() {
                                                     openAddLocation("building")
                                                 }
                                             >
-                                                +
+                                                Добавить локацию
                                             </button>
                                         </div>
                                     </>
@@ -1646,41 +1689,165 @@ export default function App() {
                                     />
                                 </label>
                                 <label className="field-label">
-                                    Полка
-                                    <div className="inline-actions">
-                                        <select
-                                            className="text-input"
-                                            value={bookDraft.locationId}
-                                            onChange={(event) =>
-                                                setBookDraft((prev) => ({
-                                                    ...prev,
-                                                    locationId:
-                                                        event.target.value,
-                                                }))
-                                            }
-                                        >
-                                            <option value="">
-                                                Пока не выбрана
-                                            </option>
-                                            {shelfLocations.map((location) => (
-                                                <option
-                                                    key={location.id}
-                                                    value={location.id}
-                                                >
-                                                    {location.name}
+                                    Локация
+                                    <div className="location-selectors">
+                                        <div className="inline-actions">
+                                            <select
+                                                className="text-input"
+                                                value={selectedBuildingId}
+                                                onChange={(event) => {
+                                                    const value = event.target.value
+                                                    setSelectedBuildingId(value)
+                                                    setSelectedRoomId("")
+                                                    setSelectedCabinetId("")
+                                                    setSelectedShelfId("")
+                                                    setBookDraft((prev) => ({
+                                                        ...prev,
+                                                        locationId: "",
+                                                    }))
+                                                    if (value) {
+                                                        loadChildren(value, "room", true)
+                                                    }
+                                                }}
+                                            >
+                                                <option value="">
+                                                    Здание
                                                 </option>
-                                            ))}
-                                        </select>
-                                        <button
-                                            className="ghost-button"
-                                            type="button"
-                                            onClick={() =>
-                                                openAddLocation("shelf")
-                                            }
-                                            aria-label="Добавить локацию"
-                                        >
-                                            +
-                                        </button>
+                                                {buildingLocations.map((location) => (
+                                                    <option
+                                                        key={location.id}
+                                                        value={location.id}
+                                                    >
+                                                        {location.name}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            <button
+                                                className="ghost-button"
+                                                type="button"
+                                                onClick={() => openAddLocation("building")}
+                                                aria-label="Добавить здание"
+                                            >
+                                                +
+                                            </button>
+                                        </div>
+                                        <div className="inline-actions">
+                                            <select
+                                                className="text-input"
+                                                value={selectedRoomId}
+                                                onChange={(event) => {
+                                                    const value = event.target.value
+                                                    setSelectedRoomId(value)
+                                                    setSelectedCabinetId("")
+                                                    setSelectedShelfId("")
+                                                    setBookDraft((prev) => ({
+                                                        ...prev,
+                                                        locationId: "",
+                                                    }))
+                                                    if (value) {
+                                                        loadChildren(value, "cabinet", true)
+                                                    }
+                                                }}
+                                                disabled={!selectedBuildingId}
+                                            >
+                                                <option value="">Комната</option>
+                                                {roomLocations.map((location) => (
+                                                    <option
+                                                        key={location.id}
+                                                        value={location.id}
+                                                    >
+                                                        {location.name}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            <button
+                                                className="ghost-button"
+                                                type="button"
+                                                onClick={() =>
+                                                    openAddLocation("room", selectedBuildingId)
+                                                }
+                                                aria-label="Добавить комнату"
+                                                disabled={!selectedBuildingId}
+                                            >
+                                                +
+                                            </button>
+                                        </div>
+                                        <div className="inline-actions">
+                                            <select
+                                                className="text-input"
+                                                value={selectedCabinetId}
+                                                onChange={(event) => {
+                                                    const value = event.target.value
+                                                    setSelectedCabinetId(value)
+                                                    setSelectedShelfId("")
+                                                    setBookDraft((prev) => ({
+                                                        ...prev,
+                                                        locationId: "",
+                                                    }))
+                                                    if (value) {
+                                                        loadChildren(value, "shelf", true)
+                                                    }
+                                                }}
+                                                disabled={!selectedRoomId}
+                                            >
+                                                <option value="">Шкаф</option>
+                                                {cabinetLocations.map((location) => (
+                                                    <option
+                                                        key={location.id}
+                                                        value={location.id}
+                                                    >
+                                                        {location.name}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            <button
+                                                className="ghost-button"
+                                                type="button"
+                                                onClick={() =>
+                                                    openAddLocation("cabinet", selectedRoomId)
+                                                }
+                                                aria-label="Добавить шкаф"
+                                                disabled={!selectedRoomId}
+                                            >
+                                                +
+                                            </button>
+                                        </div>
+                                        <div className="inline-actions">
+                                            <select
+                                                className="text-input"
+                                                value={selectedShelfId}
+                                                onChange={(event) => {
+                                                    const value = event.target.value
+                                                    setSelectedShelfId(value)
+                                                    setBookDraft((prev) => ({
+                                                        ...prev,
+                                                        locationId: value,
+                                                    }))
+                                                }}
+                                                disabled={!selectedCabinetId}
+                                            >
+                                                <option value="">Полка</option>
+                                                {shelfLocationsForSelection.map((location) => (
+                                                    <option
+                                                        key={location.id}
+                                                        value={location.id}
+                                                    >
+                                                        {location.name}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            <button
+                                                className="ghost-button"
+                                                type="button"
+                                                onClick={() =>
+                                                    openAddLocation("shelf", selectedCabinetId)
+                                                }
+                                                aria-label="Добавить полку"
+                                                disabled={!selectedCabinetId}
+                                            >
+                                                +
+                                            </button>
+                                        </div>
                                     </div>
                                 </label>
                                 <label className="field-label">
@@ -1750,6 +1917,15 @@ export default function App() {
                                             className="ghost-button"
                                             type="button"
                                             onClick={() =>
+                                                setIsWorksPickerOpen((prev) => !prev)
+                                            }
+                                        >
+                                            Выбрать
+                                        </button>
+                                        <button
+                                            className="ghost-button"
+                                            type="button"
+                                            onClick={() =>
                                                 setIsWorkModalOpen(true)
                                             }
                                             aria-label="Добавить произведение"
@@ -1758,46 +1934,48 @@ export default function App() {
                                         </button>
                                     </div>
                                 </div>
-                                <div className="checkbox-grid">
-                                    {works.map((work) => (
-                                        <label
-                                            key={work.id}
-                                            className="checkbox-item"
-                                        >
-                                            <input
-                                                type="checkbox"
-                                                checked={bookDraft.workIds.includes(
-                                                    work.id
-                                                )}
-                                                onChange={(event) => {
-                                                    const checked =
-                                                        event.target.checked
-                                                    setBookDraft((prev) => ({
-                                                        ...prev,
-                                                        workIds: checked
-                                                            ? [
-                                                                  ...prev.workIds,
-                                                                  work.id,
-                                                              ]
-                                                            : prev.workIds.filter(
-                                                                  (id) =>
-                                                                      id !==
-                                                                      work.id
-                                                              ),
-                                                    }))
-                                                }}
-                                            />
-                                            <span>
-                                                {work.title}
-                                                <small className="item-meta">
-                                                    {(work.authors ?? [])
-                                                        .map(getAuthorName)
-                                                        .join(", ")}
-                                                </small>
-                                            </span>
-                                        </label>
-                                    ))}
-                                </div>
+                                {isWorksPickerOpen && (
+                                    <div className="checkbox-grid">
+                                        {works.map((work) => (
+                                            <label
+                                                key={work.id}
+                                                className="checkbox-item"
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    checked={bookDraft.workIds.includes(
+                                                        work.id
+                                                    )}
+                                                    onChange={(event) => {
+                                                        const checked =
+                                                            event.target.checked
+                                                        setBookDraft((prev) => ({
+                                                            ...prev,
+                                                            workIds: checked
+                                                                ? [
+                                                                      ...prev.workIds,
+                                                                      work.id,
+                                                                  ]
+                                                                : prev.workIds.filter(
+                                                                      (id) =>
+                                                                          id !==
+                                                                          work.id
+                                                                  ),
+                                                        }))
+                                                    }}
+                                                />
+                                                <span>
+                                                    {work.title}
+                                                    <small className="item-meta">
+                                                        {(work.authors ?? [])
+                                                            .map(getAuthorName)
+                                                            .join(", ")}
+                                                    </small>
+                                                </span>
+                                            </label>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                             {bookError && (
                                 <p className="error-banner">{bookError}</p>
@@ -2264,6 +2442,46 @@ export default function App() {
                                     ? "Сохранение..."
                                     : "Добавить локацию"}
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isAuthorInfoOpen && (
+                <div className="modal-backdrop">
+                    <div className="modal">
+                        <div className="modal-header">
+                            <h3>Автор</h3>
+                            <button
+                                className="ghost-button"
+                                type="button"
+                                onClick={() => setIsAuthorInfoOpen(false)}
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <div className="modal-body">
+                            {selectedAuthor ? (
+                                <div className="author-card">
+                                    <SafeImage
+                                        src={selectedAuthor.photo_url}
+                                        alt={getAuthorName(selectedAuthor)}
+                                        className="avatar"
+                                    />
+                                    <div>
+                                        <p className="author-name">
+                                            {getAuthorName(selectedAuthor)}
+                                        </p>
+                                        {selectedAuthor.bio && (
+                                            <p className="item-meta">
+                                                {selectedAuthor.bio}
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
+                            ) : (
+                                <p className="status-line">Загрузка...</p>
+                            )}
                         </div>
                     </div>
                 </div>

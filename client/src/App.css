@@ -475,6 +475,16 @@
   font-weight: 600;
 }
 
+.user-badge-button {
+  border: none;
+  background: rgba(70, 54, 40, 0.1);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-weight: 600;
+  cursor: pointer;
+  color: inherit;
+}
+
 .tab-bar {
   display: flex;
   flex-wrap: wrap;
@@ -768,6 +778,14 @@ select.text-input {
   gap: 24px;
 }
 
+.profile-actions {
+  margin-top: 16px;
+}
+
+.profile-actions-spaced {
+  margin-top: 32px;
+}
+
 .tag-list {
   display: flex;
   flex-wrap: wrap;
@@ -829,6 +847,12 @@ select.text-input {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.location-selectors {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
 }
 
 @media (max-width: 900px) {
