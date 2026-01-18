@@ -40,6 +40,7 @@ export type WorkShort = {
     id: string
     title: string
     authors: AuthorSummary[]
+    year?: number
 }
 
 export type WorkDetailed = {

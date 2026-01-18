@@ -737,6 +737,21 @@ select.text-input {
   background: rgba(255, 255, 255, 0.7);
 }
 
+.author-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid rgba(120, 96, 70, 0.2);
+  border-radius: 12px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.icon-minus {
+  font-size: 1.4rem;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -841,7 +856,7 @@ select.text-input {
   justify-content: center;
   cursor: pointer;
   font-weight: 700;
-  font-size: 1.35rem;
+  font-size: 1.45rem;
   transition: transform 0.2s ease;
 }
 
@@ -866,6 +881,26 @@ select.text-input {
 
 .icon-rotated {
   transform: rotate(90deg);
+}
+
+.icon-plus-button {
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-weight: 800;
+  font-size: 1.35rem;
+  color: #3a2d20;
+}
+
+.location-address {
+  color: rgba(83, 66, 48, 0.55);
+  font-size: 0.9rem;
 }
 
 .location-empty {

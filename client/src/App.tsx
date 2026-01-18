@@ -208,6 +208,9 @@ export default function App() {
 
     const [workQuery, setWorkQuery] = useState("")
     const [selectedWork, setSelectedWork] = useState<WorkShort | null>(null)
+    const [selectedWorkDetail, setSelectedWorkDetail] =
+        useState<WorkShort | null>(null)
+    const [isWorkInfoOpen, setIsWorkInfoOpen] = useState(false)
     const [workBooks, setWorkBooks] = useState<BookPublic[]>([])
     const [workBooksLoading, setWorkBooksLoading] = useState(false)
 
@@ -507,6 +510,8 @@ export default function App() {
 
     async function handleWorkSelect(work: WorkShort) {
         setSelectedWork(work)
+        setSelectedWorkDetail(work)
+        setIsWorkInfoOpen(true)
         setWorkBooks([])
         setWorkBooksLoading(true)
         try {
@@ -602,7 +607,19 @@ export default function App() {
                 },
                 authors: workDraft.authorIds,
             })
-            setWorks((prev) => [created, ...prev])
+            const selectedAuthors = authors.filter((author) =>
+                workDraft.authorIds.includes(author.id)
+            )
+            const year = workDraft.year ? Number(workDraft.year) : undefined
+            setWorks((prev) => [
+                {
+                    id: created.id,
+                    title: created.title,
+                    authors: selectedAuthors,
+                    year,
+                },
+                ...prev,
+            ])
             setWorkDraft(emptyWorkDraft)
             setIsWorkModalOpen(false)
             if (isBookModalOpen) {
@@ -857,10 +874,7 @@ export default function App() {
 
         return (
             <div key={location.id} className="location-node">
-                <div
-                    className="location-row"
-                    style={{paddingLeft: `${level * 16}px`}}
-                >
+                <div className="location-row">
                     {childType ? (
                         <button
                             className={`icon-button ${
@@ -874,7 +888,7 @@ export default function App() {
                                     : "Развернуть"
                             }
                         >
-                            {isExpanded ? "▾" : "▸"}
+                            ▸
                         </button>
                     ) : (
                         <span className="icon-placeholder" />
@@ -882,9 +896,14 @@ export default function App() {
                     <span className="location-name">
                         {location.name}
                     </span>
+                    {location.type === "building" && location.address && (
+                        <span className="location-address">
+                            {location.address}
+                        </span>
+                    )}
                     {childType && (
                         <button
-                            className="ghost-button"
+                            className="icon-plus-button"
                             type="button"
                             onClick={() =>
                                 openAddLocation(childType, location.id)
@@ -1152,9 +1171,15 @@ export default function App() {
                                     >
                                         <span>{work.title}</span>
                                         <span className="item-meta">
-                                            {(work.authors ?? [])
-                                                .map(getAuthorName)
-                                                .join(", ") || "Без автора"}
+                                            {(() => {
+                                                const names = (work.authors ?? [])
+                                                    .map(getAuthorName)
+                                                    .join(", ")
+                                                const base = names || "Без автора"
+                                                return work.year
+                                                    ? `${base}, ${work.year}`
+                                                    : base
+                                            })()}
                                         </span>
                                     </button>
                                 ))}
@@ -1969,13 +1994,20 @@ export default function App() {
                                                 <span>
                                                     {work.title}
                                                     <small className="item-meta">
-                                                        {(work.authors ?? [])
+                                                    {(() => {
+                                                        const names = (work.authors ?? [])
                                                             .map(getAuthorName)
-                                                            .join(", ")}
-                                                    </small>
-                                                </span>
-                                            </label>
-                                        ))}
+                                                            .join(", ")
+                                                        const base =
+                                                            names || "Без автора"
+                                                        return work.year
+                                                            ? `${base}, ${work.year}`
+                                                            : base
+                                                    })()}
+                                                </small>
+                                            </span>
+                                        </label>
+                                    ))}
                                     </div>
                                 )}
                             </div>
@@ -2065,37 +2097,49 @@ export default function App() {
                                     </button>
                                 </div>
                                 <div className="checkbox-grid">
-                                    {authors.map((author) => (
-                                        <label
-                                            key={author.id}
-                                            className="checkbox-item"
-                                        >
-                                            <input
-                                                type="checkbox"
-                                                checked={workDraft.authorIds.includes(
-                                                    author.id
-                                                )}
-                                                onChange={(event) => {
-                                                    const checked =
-                                                        event.target.checked
-                                                    setWorkDraft((prev) => ({
-                                                        ...prev,
-                                                        authorIds: checked
-                                                            ? [
-                                                                  ...prev.authorIds,
-                                                                  author.id,
-                                                              ]
-                                                            : prev.authorIds.filter(
-                                                                  (id) =>
-                                                                      id !==
-                                                                      author.id
-                                                              ),
-                                                    }))
-                                                }}
-                                            />
-                                            <span>{getAuthorName(author)}</span>
-                                        </label>
-                                    ))}
+                                    {authors.map((author) => {
+                                        const isSelected = workDraft.authorIds.includes(
+                                            author.id
+                                        )
+                                        return (
+                                            <div
+                                                key={author.id}
+                                                className="author-row"
+                                            >
+                                                <span>{getAuthorName(author)}</span>
+                                                <button
+                                                    className={`icon-plus-button ${
+                                                        isSelected
+                                                            ? "icon-minus"
+                                                            : ""
+                                                    }`}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setWorkDraft((prev) => ({
+                                                            ...prev,
+                                                            authorIds: isSelected
+                                                                ? prev.authorIds.filter(
+                                                                      (id) =>
+                                                                          id !==
+                                                                          author.id
+                                                                  )
+                                                                : [
+                                                                      ...prev.authorIds,
+                                                                      author.id,
+                                                                  ],
+                                                        }))
+                                                    }}
+                                                    aria-label={
+                                                        isSelected
+                                                            ? "Убрать автора"
+                                                            : "Добавить автора"
+                                                    }
+                                                >
+                                                    {isSelected ? "−" : "+"}
+                                                </button>
+                                            </div>
+                                        )
+                                    })}
                                 </div>
                             </div>
                             {workError && (
@@ -2533,6 +2577,54 @@ export default function App() {
                                 <p className="status-line">Загрузка...</p>
                             )}
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {isWorkInfoOpen && (
+                <div className="modal-backdrop">
+                    <div className="modal">
+                        <div className="modal-header">
+                            <h3>Произведение</h3>
+                            <button
+                                className="ghost-button"
+                                type="button"
+                                onClick={() => setIsWorkInfoOpen(false)}
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <div className="modal-body">
+                            {selectedWorkDetail ? (
+                                <div className="stack">
+                                    <h4>{selectedWorkDetail.title}</h4>
+                                    <p className="item-meta">
+                                        {(() => {
+                                            const names = (selectedWorkDetail.authors ?? [])
+                                                .map(getAuthorName)
+                                                .join(", ")
+                                            const base = names || "Без автора"
+                                            return selectedWorkDetail.year
+                                                ? `${base}, ${selectedWorkDetail.year}`
+                                                : base
+                                        })()}
+                                    </p>
+                                </div>
+                            ) : (
+                                <p className="status-line">Загрузка...</p>
+                            )}
+                        </div>
+                        {isAdmin && (
+                            <div className="modal-footer">
+                                <button
+                                    className="ghost-button"
+                                    type="button"
+                                    onClick={() => setIsWorkModalOpen(true)}
+                                >
+                                    Изменить
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
