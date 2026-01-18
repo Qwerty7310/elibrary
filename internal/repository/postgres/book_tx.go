@@ -116,7 +116,7 @@ func (t *bookTx) ReplaceBookWorks(ctx context.Context, bookID uuid.UUID, works [
 	_, err = t.tx.Exec(ctx, `
 		INSERT INTO book_works (book_id, work_id, position)
 		SELECT $1, w, p
-		FROM UNNEST($2::uuid[], $3::int[]) AS (w, p)
+		FROM UNNEST($2::uuid[], $3::int[]) AS t(w, p)
 	`, bookID, workIDs, positions)
 
 	return err
