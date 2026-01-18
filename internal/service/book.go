@@ -55,7 +55,7 @@ func (s *BookService) Create(ctx context.Context, book domain.Book, works []repo
 
 	for _, w := range works {
 		if _, err := s.workRepo.GetByID(ctx, w.WorkID); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("work %s not found: %w", w.WorkID, err)
 		}
 	}
 
