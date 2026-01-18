@@ -14,6 +14,6 @@ type BookWorksRepository interface {
 }
 
 type BookWorkInput struct {
-	WorkID   uuid.UUID
-	Position *int
+	WorkID   uuid.UUID `json:"work_id"`
+	Position *int      `json:"position,omitempty"`
 }
