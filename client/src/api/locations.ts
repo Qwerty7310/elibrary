@@ -1,5 +1,5 @@
 import type {LocationEntity} from "../types/library"
-import {requestJson} from "./http"
+import {ApiError, requestJson} from "./http"
 
 export function createLocation(payload: {
     parent_id?: string
@@ -20,10 +20,18 @@ export function getLocationsByType(type: string) {
     )
 }
 
-export function getLocationChildren(parentId: string, type: string) {
-    return requestJson<LocationEntity[] | null>(
-        `/locations/child/${encodeURIComponent(parentId)}/${encodeURIComponent(
-            type
-        )}`
-    )
+export async function getLocationChildren(parentId: string, type: string) {
+    try {
+        return await requestJson<LocationEntity[] | null>(
+            `/locations/child/${encodeURIComponent(
+                parentId
+            )}/${encodeURIComponent(type)}`
+        )
+    } catch (error) {
+        const apiError = error as ApiError
+        if (apiError.status === 404) {
+            return []
+        }
+        throw error
+    }
 }

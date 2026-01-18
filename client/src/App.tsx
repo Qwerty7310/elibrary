@@ -78,6 +78,8 @@ type LocationDraft = {
     name: string
     address: string
     description: string
+    lockParent: boolean
+    lockType: boolean
 }
 
 const emptyBookDraft: BookDraft = {
@@ -119,6 +121,8 @@ const emptyLocationDraft: LocationDraft = {
     name: "",
     address: "",
     description: "",
+    lockParent: false,
+    lockType: false,
 }
 
 function parseJwt(token: string) {
@@ -834,6 +838,8 @@ export default function App() {
             name: "",
             address: "",
             description: "",
+            lockParent: !!parentId,
+            lockType: !!type,
         })
         setLocationError(null)
         const parentType = getParentType(type)
@@ -857,7 +863,9 @@ export default function App() {
                 >
                     {childType ? (
                         <button
-                            className="icon-button"
+                            className={`icon-button ${
+                                isExpanded ? "icon-rotated" : ""
+                            }`}
                             type="button"
                             onClick={() => toggleLocation(location)}
                             aria-label={
@@ -893,7 +901,9 @@ export default function App() {
                             <span className="item-meta">Загрузка...</span>
                         )}
                         {!isLoading && children.length === 0 && (
-                            <span className="item-meta">Нет дочерних</span>
+                            <div className="location-empty">
+                                Нет дочерних локаций
+                            </div>
                         )}
                         {children.map((child) =>
                             renderLocationNode(child, level + 1)
@@ -972,7 +982,6 @@ export default function App() {
                         "authors",
                         "publishers",
                         "locations",
-                        "profile",
                     ] as TabKey[]
                 ).map(
                     (tab) => (
@@ -989,7 +998,6 @@ export default function App() {
                             {tab === "authors" && "Авторы"}
                             {tab === "publishers" && "Издательства"}
                             {tab === "locations" && "Локации"}
-                            {tab === "profile" && "Личный кабинет"}
                         </button>
                     )
                 )}
@@ -1231,31 +1239,9 @@ export default function App() {
                             </div>
                         </div>
                         <div>
-                            <h3 className="subheading">
-                                Книги, связанные с автором
-                            </h3>
-                            {authorBooksLoading && (
-                                <p className="status-line">Загрузка...</p>
-                            )}
-                            {!authorBooksLoading &&
-                                authorBooks.length === 0 && (
-                                <p className="status-line">Нет данных</p>
-                            )}
-                            <div className="stack">
-                                {authorBooks.map((book) => (
-                                    <div key={book.id} className="mini-card">
-                                        <span>{book.title}</span>
-                                        {isAdmin && "location" in book && (
-                                            <span className="item-meta">
-                                                {formatLocation(
-                                                    (book as BookInternal)
-                                                        .location
-                                                )}
-                                            </span>
-                                        )}
-                                    </div>
-                                ))}
-                            </div>
+                            <p className="status-line">
+                                Выберите автора слева, чтобы открыть карточку.
+                            </p>
                         </div>
                     </div>
                 </section>
@@ -1641,7 +1627,11 @@ export default function App() {
                                     Издательство
                                     <div className="inline-actions">
                                         <select
-                                            className="text-input"
+                                            className={`text-input ${
+                                                bookDraft.publisherId
+                                                    ? ""
+                                                    : "select-empty"
+                                            }`}
                                             value={bookDraft.publisherId}
                                             onChange={(event) =>
                                                 setBookDraft((prev) => ({
@@ -1651,9 +1641,7 @@ export default function App() {
                                                 }))
                                             }
                                         >
-                                            <option value="">
-                                                Без издательства
-                                            </option>
+                                            <option value="">Не выбрано</option>
                                             {publishers.map((publisher) => (
                                                 <option
                                                     key={publisher.id}
@@ -1693,7 +1681,11 @@ export default function App() {
                                     <div className="location-selectors">
                                         <div className="inline-actions">
                                             <select
-                                                className="text-input"
+                                                className={`text-input ${
+                                                    selectedBuildingId
+                                                        ? ""
+                                                        : "select-empty"
+                                                }`}
                                                 value={selectedBuildingId}
                                                 onChange={(event) => {
                                                     const value = event.target.value
@@ -1710,9 +1702,7 @@ export default function App() {
                                                     }
                                                 }}
                                             >
-                                                <option value="">
-                                                    Здание
-                                                </option>
+                                                <option value="">Не выбрано</option>
                                                 {buildingLocations.map((location) => (
                                                     <option
                                                         key={location.id}
@@ -1733,7 +1723,11 @@ export default function App() {
                                         </div>
                                         <div className="inline-actions">
                                             <select
-                                                className="text-input"
+                                                className={`text-input ${
+                                                    selectedRoomId
+                                                        ? ""
+                                                        : "select-empty"
+                                                }`}
                                                 value={selectedRoomId}
                                                 onChange={(event) => {
                                                     const value = event.target.value
@@ -1750,7 +1744,7 @@ export default function App() {
                                                 }}
                                                 disabled={!selectedBuildingId}
                                             >
-                                                <option value="">Комната</option>
+                                                <option value="">Не выбрано</option>
                                                 {roomLocations.map((location) => (
                                                     <option
                                                         key={location.id}
@@ -1774,7 +1768,11 @@ export default function App() {
                                         </div>
                                         <div className="inline-actions">
                                             <select
-                                                className="text-input"
+                                                className={`text-input ${
+                                                    selectedCabinetId
+                                                        ? ""
+                                                        : "select-empty"
+                                                }`}
                                                 value={selectedCabinetId}
                                                 onChange={(event) => {
                                                     const value = event.target.value
@@ -1790,7 +1788,7 @@ export default function App() {
                                                 }}
                                                 disabled={!selectedRoomId}
                                             >
-                                                <option value="">Шкаф</option>
+                                                <option value="">Не выбрано</option>
                                                 {cabinetLocations.map((location) => (
                                                     <option
                                                         key={location.id}
@@ -1814,7 +1812,11 @@ export default function App() {
                                         </div>
                                         <div className="inline-actions">
                                             <select
-                                                className="text-input"
+                                                className={`text-input ${
+                                                    selectedShelfId
+                                                        ? ""
+                                                        : "select-empty"
+                                                }`}
                                                 value={selectedShelfId}
                                                 onChange={(event) => {
                                                     const value = event.target.value
@@ -1826,7 +1828,7 @@ export default function App() {
                                                 }}
                                                 disabled={!selectedCabinetId}
                                             >
-                                                <option value="">Полка</option>
+                                                <option value="">Не выбрано</option>
                                                 {shelfLocationsForSelection.map((location) => (
                                                     <option
                                                         key={location.id}
@@ -2333,7 +2335,9 @@ export default function App() {
                             <label className="field-label">
                                 Тип
                                 <select
-                                    className="text-input"
+                                    className={`text-input ${
+                                        locationDraft.type ? "" : "select-empty"
+                                    }`}
                                     value={locationDraft.type}
                                     onChange={(event) => {
                                         const nextType = event.target.value
@@ -2341,17 +2345,20 @@ export default function App() {
                                             ...prev,
                                             type: nextType,
                                             parentId: "",
+                                            lockParent: false,
+                                            lockType: prev.lockType,
                                         }))
                                         const parentType = getParentType(nextType)
                                         if (parentType) {
                                             ensureLocationsByType(parentType)
                                         }
                                     }}
+                                    disabled={locationDraft.lockType}
                                 >
-                                    <option value="">Выберите тип</option>
+                                    <option value="">Не выбрано</option>
                                     <option value="building">Здание</option>
                                     <option value="room">Комната</option>
-                                    <option value="cabinet">Кабинет</option>
+                                    <option value="cabinet">Шкаф</option>
                                     <option value="shelf">Полка</option>
                                 </select>
                             </label>
@@ -2371,7 +2378,9 @@ export default function App() {
                             <label className="field-label">
                                 Родитель
                                 <select
-                                    className="text-input"
+                                    className={`text-input ${
+                                        locationDraft.parentId ? "" : "select-empty"
+                                    }`}
                                     value={locationDraft.parentId}
                                     onChange={(event) =>
                                         setLocationDraft((prev) => ({
@@ -2379,11 +2388,14 @@ export default function App() {
                                             parentId: event.target.value,
                                         }))
                                     }
-                                    disabled={!getParentType(locationDraft.type)}
+                                    disabled={
+                                        !getParentType(locationDraft.type) ||
+                                        locationDraft.lockParent
+                                    }
                                 >
                                     <option value="">
                                         {getParentType(locationDraft.type)
-                                            ? "Выберите родителя"
+                                            ? "Не выбрано"
                                             : "Не требуется"}
                                     </option>
                                     {(getParentType(locationDraft.type)
@@ -2462,21 +2474,59 @@ export default function App() {
                         </div>
                         <div className="modal-body">
                             {selectedAuthor ? (
-                                <div className="author-card">
-                                    <SafeImage
-                                        src={selectedAuthor.photo_url}
-                                        alt={getAuthorName(selectedAuthor)}
-                                        className="avatar"
-                                    />
+                                <div className="stack">
+                                    <div className="author-card">
+                                        <SafeImage
+                                            src={selectedAuthor.photo_url}
+                                            alt={getAuthorName(selectedAuthor)}
+                                            className="avatar"
+                                        />
+                                        <div>
+                                            <p className="author-name">
+                                                {getAuthorName(selectedAuthor)}
+                                            </p>
+                                            {selectedAuthor.bio && (
+                                                <p className="item-meta">
+                                                    {selectedAuthor.bio}
+                                                </p>
+                                            )}
+                                        </div>
+                                    </div>
                                     <div>
-                                        <p className="author-name">
-                                            {getAuthorName(selectedAuthor)}
-                                        </p>
-                                        {selectedAuthor.bio && (
-                                            <p className="item-meta">
-                                                {selectedAuthor.bio}
+                                        <h4 className="subheading">
+                                            Книги, связанные с автором
+                                        </h4>
+                                        {authorBooksLoading && (
+                                            <p className="status-line">
+                                                Загрузка...
                                             </p>
                                         )}
+                                        {!authorBooksLoading &&
+                                            authorBooks.length === 0 && (
+                                            <p className="status-line">
+                                                Нет данных
+                                            </p>
+                                        )}
+                                        <div className="stack">
+                                            {authorBooks.map((book) => (
+                                                <div
+                                                    key={book.id}
+                                                    className="mini-card"
+                                                >
+                                                    <span>{book.title}</span>
+                                                    {isAdmin &&
+                                                        "location" in book && (
+                                                            <span className="item-meta">
+                                                                {formatLocation(
+                                                                    (
+                                                                        book as BookInternal
+                                                                    ).location
+                                                                )}
+                                                            </span>
+                                                        )}
+                                                </div>
+                                            ))}
+                                        </div>
                                     </div>
                                 </div>
                             ) : (
