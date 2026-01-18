@@ -126,13 +126,24 @@ func (s *LocationService) GetByID(ctx context.Context, id uuid.UUID) (*domain.Lo
 	return location, nil
 }
 
+func (s *LocationService) GetByType(ctx context.Context, locType domain.LocationType) ([]*domain.Location, error) {
+	locations, err := s.locRepo.GetByType(ctx, locType)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, domain.ErrNotFound
+		}
+		return nil, err
+	}
+
+	return locations, nil
+}
+
 func (s *LocationService) GetByTypeParentID(ctx context.Context, locType domain.LocationType, parentID uuid.UUID) ([]*domain.Location, error) {
 	parent, err := s.locRepo.GetByID(ctx, parentID)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil, ErrParentNotFound
 		}
-		log.Printf("Error getting parent location %s: %v", parentID, err)
 		return nil, err
 	}
 
@@ -145,7 +156,6 @@ func (s *LocationService) GetByTypeParentID(ctx context.Context, locType domain.
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil, domain.ErrNotFound
 		}
-		log.Printf("Error getting locations for parent %s: %v", parentID, err)
 		return nil, err
 	}
 
@@ -162,7 +172,6 @@ func (s *LocationService) GetByBarcode(ctx context.Context, barcode string) (*do
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil, domain.ErrNotFound
 		}
-		log.Printf("Error getting location %s: %v", barcode, err)
 		return nil, err
 	}
 
@@ -175,7 +184,6 @@ func (s *LocationService) Delete(ctx context.Context, id uuid.UUID) error {
 		if errors.Is(err, repository.ErrNotFound) {
 			return domain.ErrNotFound
 		}
-		log.Printf("Error deleting location %s: %v", id, err)
 		return err
 	}
 

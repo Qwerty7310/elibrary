@@ -122,6 +122,40 @@ func (h *LocationHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, location)
 }
 
+func (h *LocationHandler) GetByType(w http.ResponseWriter, r *http.Request) {
+	typeStr := chi.URLParam(r, "type")
+	locType, err := domain.ParseLocationType(typeStr)
+	if err != nil {
+		if errors.Is(err, domain.ErrInvalidLocationType) {
+			log.Printf("invalid location type %s: %v", typeStr, err)
+			http.Error(w, "invalid location type", http.StatusBadRequest)
+			return
+		}
+		log.Printf("failed to parse location type %s: %v", typeStr, err)
+		http.Error(w, "failed to parse location type", http.StatusInternalServerError)
+		return
+	}
+
+	locations, err := h.Service.GetByType(r.Context(), locType)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			log.Printf("location %s not found: %v", typeStr, err)
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, service.ErrInvalidLocationType) {
+			log.Printf("invalid location type %s: %v", locType, err)
+			http.Error(w, "invalid location type", http.StatusBadRequest)
+			return
+		}
+		log.Printf("error getting locations %s: %v", typeStr, err)
+		http.Error(w, "error getting locations", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, locations)
+}
+
 func (h *LocationHandler) GetByParentID(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
@@ -135,8 +169,13 @@ func (h *LocationHandler) GetByParentID(w http.ResponseWriter, r *http.Request) 
 
 	locType, err := domain.ParseLocationType(typeStr)
 	if err != nil {
-		log.Printf("invalid location type %s: %v", typeStr, err)
-		http.Error(w, "invalid location type", http.StatusBadRequest)
+		if errors.Is(err, service.ErrInvalidLocationType) {
+			log.Printf("invalid locatrion type %s: %v", typeStr, err)
+			http.Error(w, "invalid locatrion type", http.StatusBadRequest)
+			return
+		}
+		log.Printf("failed to parse location type %s: %v", typeStr, err)
+		http.Error(w, "failed to parse location type", http.StatusInternalServerError)
 		return
 	}
 

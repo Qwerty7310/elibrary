@@ -13,3 +13,17 @@ export function createLocation(payload: {
         body: JSON.stringify(payload),
     })
 }
+
+export function getLocationsByType(type: string) {
+    return requestJson<LocationEntity[] | null>(
+        `/locations/type/${encodeURIComponent(type)}`
+    )
+}
+
+export function getLocationChildren(parentId: string, type: string) {
+    return requestJson<LocationEntity[] | null>(
+        `/locations/child/${encodeURIComponent(parentId)}/${encodeURIComponent(
+            type
+        )}`
+    )
+}

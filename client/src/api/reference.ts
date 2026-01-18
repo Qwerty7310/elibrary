@@ -1,15 +1,17 @@
 import type {AuthorSummary, Publisher, WorkShort} from "../types/library"
 import {requestJson} from "./http"
 
-export function getAuthorsReference() {
-    return requestJson<AuthorSummary[]>("/reference/authors")
+export async function getAuthorsReference() {
+    const data = await requestJson<AuthorSummary[] | null>("/reference/authors")
+    return data ?? []
 }
 
-export function getWorksReference() {
-    return requestJson<WorkShort[]>("/reference/works")
+export async function getWorksReference() {
+    const data = await requestJson<WorkShort[] | null>("/reference/works")
+    return data ?? []
 }
 
-export function getPublishersReference() {
-    return requestJson<Publisher[]>("/reference/publishers")
+export async function getPublishersReference() {
+    const data = await requestJson<Publisher[] | null>("/reference/publishers")
+    return data ?? []
 }
-

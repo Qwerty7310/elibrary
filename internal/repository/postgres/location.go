@@ -100,6 +100,51 @@ func (r *LocationRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain
 	return &location, nil
 }
 
+func (r *LocationRepository) GetByType(ctx context.Context, locType domain.LocationType) ([]*domain.Location, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id, parent_id, type, name, barcode, address, description, created_at, updated_at
+		FROM locations
+		WHERE type = $1
+		ORDER BY name
+	`, locType)
+
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var locations []*domain.Location
+	for rows.Next() {
+		var loc domain.Location
+
+		if err := rows.Scan(
+			&loc.ID,
+			&loc.ParentID,
+			&loc.Type,
+			&loc.Name,
+			&loc.Barcode,
+			&loc.Address,
+			&loc.Description,
+			&loc.CreatedAt,
+			&loc.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+
+		locations = append(locations, &loc)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if len(locations) == 0 {
+		return nil, repository.ErrNotFound
+	}
+
+	return locations, nil
+}
+
 func (r *LocationRepository) GetByTypeParentID(ctx context.Context, locType domain.LocationType, parentID uuid.UUID) ([]*domain.Location, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT id, parent_id, type, name, barcode, address, description, created_at, updated_at

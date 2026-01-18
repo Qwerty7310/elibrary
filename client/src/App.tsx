@@ -5,7 +5,11 @@ import {createBook, searchBooksInternal, searchBooksPublic} from "./api/books"
 import {createAuthor, getAuthorByID} from "./api/authors"
 import {createPublisher} from "./api/publishers"
 import {createWork} from "./api/works"
-import {createLocation} from "./api/locations"
+import {
+    createLocation,
+    getLocationChildren,
+    getLocationsByType,
+} from "./api/locations"
 import {
     getAuthorsReference,
     getPublishersReference,
@@ -21,12 +25,19 @@ import type {
     BookInternal,
     BookPublic,
     BookWorkInput,
+    LocationEntity,
     Publisher,
     User,
     WorkShort,
 } from "./types/library"
 
-type TabKey = "books" | "works" | "authors" | "profile"
+type TabKey =
+    | "books"
+    | "works"
+    | "authors"
+    | "publishers"
+    | "locations"
+    | "profile"
 
 type BookDraft = {
     title: string
@@ -35,7 +46,6 @@ type BookDraft = {
     description: string
     locationId: string
     factoryBarcode: string
-    coverUrl: string
     workIds: string[]
 }
 
@@ -77,7 +87,6 @@ const emptyBookDraft: BookDraft = {
     description: "",
     locationId: "",
     factoryBarcode: "",
-    coverUrl: "",
     workIds: [],
 }
 
@@ -173,6 +182,20 @@ export default function App() {
     const [authors, setAuthors] = useState<AuthorSummary[]>([])
     const [works, setWorks] = useState<WorkShort[]>([])
     const [publishers, setPublishers] = useState<Publisher[]>([])
+    const [locationByType, setLocationByType] = useState<
+        Record<string, LocationEntity[]>
+    >({})
+    const [locationChildren, setLocationChildren] = useState<
+        Record<string, LocationEntity[]>
+    >({})
+    const [expandedLocations, setExpandedLocations] = useState<Set<string>>(
+        () => new Set()
+    )
+    const [locationLoading, setLocationLoading] = useState<Set<string>>(
+        () => new Set()
+    )
+    const [locationsError, setLocationsError] = useState<string | null>(null)
+    const [locationsLoaded, setLocationsLoaded] = useState(false)
 
     const [booksQuery, setBooksQuery] = useState("")
     const [books, setBooks] = useState<BookPublic[]>([])
@@ -189,10 +212,13 @@ export default function App() {
     const [authorBooks, setAuthorBooks] = useState<BookPublic[]>([])
     const [authorBooksLoading, setAuthorBooksLoading] = useState(false)
 
+    const [publisherQuery, setPublisherQuery] = useState("")
+
     const [isBookModalOpen, setIsBookModalOpen] = useState(false)
     const [bookDraft, setBookDraft] = useState<BookDraft>(emptyBookDraft)
     const [bookError, setBookError] = useState<string | null>(null)
     const [bookSaving, setBookSaving] = useState(false)
+    const [coverPreview, setCoverPreview] = useState<string | null>(null)
 
     const [isWorkModalOpen, setIsWorkModalOpen] = useState(false)
     const [workDraft, setWorkDraft] = useState<WorkDraft>(emptyWorkDraft)
@@ -302,13 +328,19 @@ export default function App() {
                         getPublishersReference(),
                     ])
                 setAuthors(authorsData)
-                setWorks(worksData)
+                setWorks(worksData ?? [])
                 setPublishers(publishersData)
             } catch {
                 setAuthError("Не удалось загрузить справочники")
             }
         })()
     }, [token])
+
+    useEffect(() => {
+        if (isBookModalOpen && token) {
+            ensureLocationsByType("shelf")
+        }
+    }, [isBookModalOpen, token])
 
     const filteredWorks = useMemo(() => {
         const needle = workQuery.trim().toLowerCase()
@@ -329,6 +361,66 @@ export default function App() {
             getAuthorName(author).toLowerCase().includes(needle)
         )
     }, [authorQuery, authors])
+
+    const filteredPublishers = useMemo(() => {
+        const needle = publisherQuery.trim().toLowerCase()
+        if (!needle) {
+            return publishers
+        }
+        return publishers.filter((publisher) =>
+            publisher.name.toLowerCase().includes(needle)
+        )
+    }, [publisherQuery, publishers])
+
+    const shelfLocations = useMemo(
+        () => locationByType.shelf ?? [],
+        [locationByType]
+    )
+
+    const buildingLocations = useMemo(
+        () => locationByType.building ?? [],
+        [locationByType]
+    )
+
+    function getParentType(type: string) {
+        if (type === "room") return "building"
+        if (type === "cabinet") return "room"
+        if (type === "shelf") return "cabinet"
+        return null
+    }
+
+    async function ensureLocationsByType(type: string) {
+        if (locationByType[type]) {
+            return
+        }
+        try {
+            const data = await getLocationsByType(type)
+            setLocationByType((prev) => ({
+                ...prev,
+                [type]: data ?? [],
+            }))
+            setLocationsError(null)
+        } catch {
+            setLocationsError("Не удалось загрузить локации")
+        }
+    }
+
+    async function loadBuildingLocations() {
+        if (locationsLoaded) {
+            return
+        }
+        try {
+            const data = await getLocationsByType("building")
+            setLocationByType((prev) => ({
+                ...prev,
+                building: data ?? [],
+            }))
+            setLocationsLoaded(true)
+            setLocationsError(null)
+        } catch {
+            setLocationsError("Не удалось загрузить локации")
+        }
+    }
 
     async function handleLoginSubmit(event: React.FormEvent) {
         event.preventDefault()
@@ -448,15 +540,14 @@ export default function App() {
                 description: bookDraft.description.trim() || undefined,
                 location_id: bookDraft.locationId || undefined,
                 factory_barcode: bookDraft.factoryBarcode.trim() || undefined,
-                extra: bookDraft.coverUrl.trim()
-                    ? {cover_url: bookDraft.coverUrl.trim()}
-                    : undefined,
+                extra: undefined,
             },
             works: worksPayload,
         }
         try {
             await createBook(payload)
             setBookDraft(emptyBookDraft)
+            setCoverPreview(null)
             setIsBookModalOpen(false)
             if (booksQuery.trim()) {
                 await handleBookSearch(booksQuery)
@@ -581,6 +672,11 @@ export default function App() {
             setLocationError("Тип локации обязателен")
             return
         }
+        const parentType = getParentType(locationDraft.type.trim())
+        if (parentType && !locationDraft.parentId) {
+            setLocationError("Выберите родителя для локации")
+            return
+        }
         setLocationSaving(true)
         setLocationError(null)
         try {
@@ -591,18 +687,68 @@ export default function App() {
                 address: locationDraft.address.trim() || undefined,
                 description: locationDraft.description.trim() || undefined,
             })
+            setLocationByType((prev) => ({
+                ...prev,
+                [created.type]: [created, ...(prev[created.type] ?? [])],
+            }))
             setLocationDraft(emptyLocationDraft)
             setIsLocationModalOpen(false)
-            if (isBookModalOpen) {
+            if (isBookModalOpen && created.type === "shelf") {
                 setBookDraft((prev) => ({
                     ...prev,
                     locationId: created.id,
                 }))
             }
+            if (created.parent_id) {
+                setLocationChildren((prev) => {
+                    const current = prev[created.parent_id ?? ""] ?? []
+                    return {
+                        ...prev,
+                        [created.parent_id ?? ""]: [created, ...current],
+                    }
+                })
+            }
         } catch {
             setLocationError("Не удалось создать локацию")
         } finally {
             setLocationSaving(false)
+        }
+    }
+
+    async function toggleLocation(location: LocationEntity) {
+        const id = location.id
+        const isExpanded = expandedLocations.has(id)
+        if (isExpanded) {
+            setExpandedLocations((prev) => {
+                const next = new Set(prev)
+                next.delete(id)
+                return next
+            })
+            return
+        }
+
+        setExpandedLocations((prev) => new Set(prev).add(id))
+
+        const childType = getChildType(location.type)
+        if (!childType || locationChildren[id]) {
+            return
+        }
+
+        setLocationLoading((prev) => new Set(prev).add(id))
+        try {
+            const data = await getLocationChildren(id, childType)
+            setLocationChildren((prev) => ({
+                ...prev,
+                [id]: data ?? [],
+            }))
+        } catch {
+            setLocationsError("Не удалось загрузить дочерние локации")
+        } finally {
+            setLocationLoading((prev) => {
+                const next = new Set(prev)
+                next.delete(id)
+                return next
+            })
         }
     }
 
@@ -631,6 +777,96 @@ export default function App() {
         } finally {
             setProfileSaving(false)
         }
+    }
+
+    useEffect(() => {
+        if (activeTab === "locations" && token) {
+            loadBuildingLocations()
+        }
+    }, [activeTab, token, locationsLoaded])
+
+    function getChildType(type: string) {
+        if (type === "building") return "room"
+        if (type === "room") return "cabinet"
+        if (type === "cabinet") return "shelf"
+        return null
+    }
+
+    function openAddLocation(type: string, parentId = "") {
+        setLocationDraft({
+            parentId,
+            type,
+            name: "",
+            address: "",
+            description: "",
+        })
+        setLocationError(null)
+        const parentType = getParentType(type)
+        if (parentType) {
+            ensureLocationsByType(parentType)
+        }
+        setIsLocationModalOpen(true)
+    }
+
+    function renderLocationNode(location: LocationEntity, level = 0) {
+        const childType = getChildType(location.type)
+        const isExpanded = expandedLocations.has(location.id)
+        const children = locationChildren[location.id] ?? []
+        const isLoading = locationLoading.has(location.id)
+
+        return (
+            <div key={location.id} className="location-node">
+                <div
+                    className="location-row"
+                    style={{paddingLeft: `${level * 16}px`}}
+                >
+                    {childType ? (
+                        <button
+                            className="icon-button"
+                            type="button"
+                            onClick={() => toggleLocation(location)}
+                            aria-label={
+                                isExpanded
+                                    ? "Свернуть"
+                                    : "Развернуть"
+                            }
+                        >
+                            {isExpanded ? "▾" : "▸"}
+                        </button>
+                    ) : (
+                        <span className="icon-placeholder" />
+                    )}
+                    <span className="location-name">
+                        {location.name}
+                    </span>
+                    {childType && (
+                        <button
+                            className="ghost-button"
+                            type="button"
+                            onClick={() =>
+                                openAddLocation(childType, location.id)
+                            }
+                            aria-label="Добавить дочернюю локацию"
+                        >
+                            +
+                        </button>
+                    )}
+                </div>
+                {isExpanded && (
+                    <div className="location-children">
+                        {isLoading && (
+                            <span className="item-meta">Загрузка...</span>
+                        )}
+                        {!isLoading && children.length === 0 && (
+                            <span className="item-meta">Нет дочерних</span>
+                        )}
+                        {children.map((child) =>
+                            renderLocationNode(child, level + 1)
+                        )}
+                    </div>
+                )}
+            </div>
+        )
     }
 
     return (
@@ -668,7 +904,16 @@ export default function App() {
             </header>
 
             <nav className="tab-bar">
-                {(["books", "works", "authors", "profile"] as TabKey[]).map(
+                {(
+                    [
+                        "books",
+                        "works",
+                        "authors",
+                        "publishers",
+                        "locations",
+                        "profile",
+                    ] as TabKey[]
+                ).map(
                     (tab) => (
                         <button
                             key={tab}
@@ -681,6 +926,8 @@ export default function App() {
                             {tab === "books" && "Книги"}
                             {tab === "works" && "Произведения"}
                             {tab === "authors" && "Авторы"}
+                            {tab === "publishers" && "Издательства"}
+                            {tab === "locations" && "Локации"}
                             {tab === "profile" && "Личный кабинет"}
                         </button>
                     )
@@ -706,14 +953,7 @@ export default function App() {
                                     type="button"
                                     onClick={() => setIsBookModalOpen(true)}
                                 >
-                                    Создать книгу
-                                </button>
-                                <button
-                                    className="ghost-button"
-                                    type="button"
-                                    onClick={() => setIsPublisherModalOpen(true)}
-                                >
-                                    Создать издательство
+                                    Добавить книгу
                                 </button>
                             </div>
                         )}
@@ -751,11 +991,11 @@ export default function App() {
                                 <div className="item-body">
                                     <p>
                                         <strong>Произведения:</strong>{" "}
-                                        {book.works?.length
-                                            ? book.works
-                                                  .map((work) => work.title)
-                                                  .join(", ")
-                                            : "—"}
+                                            {book.works?.length
+                                                ? book.works
+                                                      .map((work) => work.title)
+                                                      .join(", ")
+                                                : "—"}
                                     </p>
                                     <p>
                                         <strong>Авторы:</strong>{" "}
@@ -764,11 +1004,12 @@ export default function App() {
                                                   new Set(
                                                       book.works.flatMap(
                                                           (work) =>
-                                                              work.authors.map(
-                                                                  (author) =>
-                                                                      getAuthorName(
-                                                                          author
-                                                                      )
+                                                              (work.authors ??
+                                                                  []
+                                                              ).map((author) =>
+                                                                  getAuthorName(
+                                                                      author
+                                                                  )
                                                               )
                                                       )
                                                   )
@@ -811,7 +1052,7 @@ export default function App() {
                                 type="button"
                                 onClick={() => setIsWorkModalOpen(true)}
                             >
-                                Создать произведение
+                                Добавить произведение
                             </button>
                         )}
                     </div>
@@ -842,7 +1083,7 @@ export default function App() {
                                     >
                                         <span>{work.title}</span>
                                         <span className="item-meta">
-                                            {work.authors
+                                            {(work.authors ?? [])
                                                 .map(getAuthorName)
                                                 .join(", ") || "Без автора"}
                                         </span>
@@ -896,7 +1137,7 @@ export default function App() {
                                 type="button"
                                 onClick={() => setIsAuthorModalOpen(true)}
                             >
-                                Создать автора
+                                Добавить автора
                             </button>
                         )}
                     </div>
@@ -979,6 +1220,102 @@ export default function App() {
                                 ))}
                             </div>
                         </div>
+                    </div>
+                </section>
+            )}
+
+            {activeTab === "publishers" && (
+                <section className="panel">
+                    <div className="panel-header">
+                        <div>
+                            <h2>Издательства</h2>
+                            <p className="results-caption">
+                                Просматривайте список издательств и их карточки.
+                            </p>
+                        </div>
+                        {isAdmin && (
+                            <button
+                                className="primary-button"
+                                type="button"
+                                onClick={() => setIsPublisherModalOpen(true)}
+                            >
+                                Добавить издательство
+                            </button>
+                        )}
+                    </div>
+                    <label className="field-label">
+                        Поиск издательства
+                        <input
+                            className="text-input"
+                            value={publisherQuery}
+                            onChange={(event) =>
+                                setPublisherQuery(event.target.value)
+                            }
+                            placeholder="Название издательства"
+                        />
+                    </label>
+                    <div className="card-grid">
+                        {filteredPublishers.map((publisher) => (
+                            <article key={publisher.id} className="item-card">
+                                <div className="item-header">
+                                    <SafeImage
+                                        src={publisher.logo_url}
+                                        alt={publisher.name}
+                                        className="avatar"
+                                    />
+                                    <div>
+                                        <h3>{publisher.name}</h3>
+                                        {publisher.web_url && (
+                                            <a
+                                                className="item-meta"
+                                                href={publisher.web_url}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                            >
+                                                {publisher.web_url}
+                                            </a>
+                                        )}
+                                    </div>
+                                </div>
+                            </article>
+                        ))}
+                    </div>
+                </section>
+            )}
+
+            {activeTab === "locations" && (
+                <section className="panel">
+                    <div className="panel-header">
+                        <div>
+                            <h2>Локации</h2>
+                            <p className="results-caption">
+                                Управляйте иерархией расположения фонда.
+                            </p>
+                        </div>
+                        {isAdmin && (
+                            <button
+                                className="primary-button"
+                                type="button"
+                                onClick={() => openAddLocation("building")}
+                            >
+                                Добавить новое здание
+                            </button>
+                        )}
+                    </div>
+                    {locationsError && (
+                        <p className="error-banner">{locationsError}</p>
+                    )}
+                    <div className="location-tree">
+                        {buildingLocations.length === 0 && (
+                            <p className="status-line">
+                                {locationsLoaded
+                                    ? "Пока нет зданий."
+                                    : "Загрузка..."}
+                            </p>
+                        )}
+                        {buildingLocations.map((location) =>
+                            renderLocationNode(location)
+                        )}
                     </div>
                 </section>
             )}
@@ -1153,16 +1490,16 @@ export default function App() {
                                                     setIsPublisherModalOpen(true)
                                                 }
                                             >
-                                                Создать издательство
+                                                +
                                             </button>
                                             <button
                                                 className="ghost-button"
                                                 type="button"
                                                 onClick={() =>
-                                                    setIsLocationModalOpen(true)
+                                                    openAddLocation("building")
                                                 }
                                             >
-                                                Создать локацию
+                                                +
                                             </button>
                                         </div>
                                     </>
@@ -1289,8 +1626,9 @@ export default function App() {
                                             onClick={() =>
                                                 setIsPublisherModalOpen(true)
                                             }
+                                            aria-label="Добавить издательство"
                                         >
-                                            Создать
+                                            +
                                         </button>
                                     </div>
                                 </label>
@@ -1308,18 +1646,42 @@ export default function App() {
                                     />
                                 </label>
                                 <label className="field-label">
-                                    ID локации
-                                    <input
-                                        className="text-input"
-                                        value={bookDraft.locationId}
-                                        onChange={(event) =>
-                                            setBookDraft((prev) => ({
-                                                ...prev,
-                                                locationId: event.target.value,
-                                            }))
-                                        }
-                                        placeholder="UUID"
-                                    />
+                                    Полка
+                                    <div className="inline-actions">
+                                        <select
+                                            className="text-input"
+                                            value={bookDraft.locationId}
+                                            onChange={(event) =>
+                                                setBookDraft((prev) => ({
+                                                    ...prev,
+                                                    locationId:
+                                                        event.target.value,
+                                                }))
+                                            }
+                                        >
+                                            <option value="">
+                                                Пока не выбрана
+                                            </option>
+                                            {shelfLocations.map((location) => (
+                                                <option
+                                                    key={location.id}
+                                                    value={location.id}
+                                                >
+                                                    {location.name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <button
+                                            className="ghost-button"
+                                            type="button"
+                                            onClick={() =>
+                                                openAddLocation("shelf")
+                                            }
+                                            aria-label="Добавить локацию"
+                                        >
+                                            +
+                                        </button>
+                                    </div>
                                 </label>
                                 <label className="field-label">
                                     Фабричный штрихкод
@@ -1336,17 +1698,34 @@ export default function App() {
                                     />
                                 </label>
                                 <label className="field-label">
-                                    Обложка (URL)
+                                    Обложка
                                     <input
                                         className="text-input"
-                                        value={bookDraft.coverUrl}
-                                        onChange={(event) =>
-                                            setBookDraft((prev) => ({
-                                                ...prev,
-                                                coverUrl: event.target.value,
-                                            }))
-                                        }
+                                        type="file"
+                                        accept="image/*"
+                                        onChange={(event) => {
+                                            const file =
+                                                event.target.files?.[0] ?? null
+                                            if (!file) {
+                                                setCoverPreview(null)
+                                                return
+                                            }
+                                            const url = URL.createObjectURL(
+                                                file
+                                            )
+                                            setCoverPreview(url)
+                                        }}
                                     />
+                                    <span className="item-meta">
+                                        Пока используется только для предпросмотра.
+                                    </span>
+                                    {coverPreview && (
+                                        <img
+                                            className="cover-preview"
+                                            src={coverPreview}
+                                            alt="Предпросмотр обложки"
+                                        />
+                                    )}
                                 </label>
                                 <label className="field-label full">
                                     Описание
@@ -1373,17 +1752,9 @@ export default function App() {
                                             onClick={() =>
                                                 setIsWorkModalOpen(true)
                                             }
+                                            aria-label="Добавить произведение"
                                         >
-                                            Создать произведение
-                                        </button>
-                                        <button
-                                            className="ghost-button"
-                                            type="button"
-                                            onClick={() =>
-                                                setIsAuthorModalOpen(true)
-                                            }
-                                        >
-                                            Создать автора
+                                            +
                                         </button>
                                     </div>
                                 </div>
@@ -1419,7 +1790,7 @@ export default function App() {
                                             <span>
                                                 {work.title}
                                                 <small className="item-meta">
-                                                    {work.authors
+                                                    {(work.authors ?? [])
                                                         .map(getAuthorName)
                                                         .join(", ")}
                                                 </small>
@@ -1439,7 +1810,7 @@ export default function App() {
                                 onClick={handleCreateBook}
                                 disabled={bookSaving}
                             >
-                                {bookSaving ? "Сохранение..." : "Создать книгу"}
+                                {bookSaving ? "Сохранение..." : "Добавить книгу"}
                             </button>
                         </div>
                     </div>
@@ -1508,8 +1879,9 @@ export default function App() {
                                         onClick={() =>
                                             setIsAuthorModalOpen(true)
                                         }
+                                        aria-label="Добавить автора"
                                     >
-                                        Создать автора
+                                        +
                                     </button>
                                 </div>
                                 <div className="checkbox-grid">
@@ -1559,7 +1931,7 @@ export default function App() {
                             >
                                 {workSaving
                                     ? "Сохранение..."
-                                    : "Создать произведение"}
+                                    : "Добавить произведение"}
                             </button>
                         </div>
                     </div>
@@ -1686,7 +2058,7 @@ export default function App() {
                                 onClick={handleCreateAuthor}
                                 disabled={authorSaving}
                             >
-                                {authorSaving ? "Сохранение..." : "Создать автора"}
+                                {authorSaving ? "Сохранение..." : "Добавить автора"}
                             </button>
                         </div>
                     </div>
@@ -1759,7 +2131,7 @@ export default function App() {
                             >
                                 {publisherSaving
                                     ? "Сохранение..."
-                                    : "Создать издательство"}
+                                    : "Добавить издательство"}
                             </button>
                         </div>
                     </div>
@@ -1785,12 +2157,18 @@ export default function App() {
                                 <select
                                     className="text-input"
                                     value={locationDraft.type}
-                                    onChange={(event) =>
+                                    onChange={(event) => {
+                                        const nextType = event.target.value
                                         setLocationDraft((prev) => ({
                                             ...prev,
-                                            type: event.target.value,
+                                            type: nextType,
+                                            parentId: "",
                                         }))
-                                    }
+                                        const parentType = getParentType(nextType)
+                                        if (parentType) {
+                                            ensureLocationsByType(parentType)
+                                        }
+                                    }}
                                 >
                                     <option value="">Выберите тип</option>
                                     <option value="building">Здание</option>
@@ -1813,8 +2191,8 @@ export default function App() {
                                 />
                             </label>
                             <label className="field-label">
-                                Родитель (UUID)
-                                <input
+                                Родитель
+                                <select
                                     className="text-input"
                                     value={locationDraft.parentId}
                                     onChange={(event) =>
@@ -1823,7 +2201,27 @@ export default function App() {
                                             parentId: event.target.value,
                                         }))
                                     }
-                                />
+                                    disabled={!getParentType(locationDraft.type)}
+                                >
+                                    <option value="">
+                                        {getParentType(locationDraft.type)
+                                            ? "Выберите родителя"
+                                            : "Не требуется"}
+                                    </option>
+                                    {(getParentType(locationDraft.type)
+                                        ? locationByType[
+                                              getParentType(locationDraft.type)!
+                                          ] ?? []
+                                        : []
+                                    ).map((location) => (
+                                        <option
+                                            key={location.id}
+                                            value={location.id}
+                                        >
+                                            {location.name}
+                                        </option>
+                                    ))}
+                                </select>
                             </label>
                             <label className="field-label">
                                 Адрес
@@ -1864,7 +2262,7 @@ export default function App() {
                             >
                                 {locationSaving
                                     ? "Сохранение..."
-                                    : "Создать локацию"}
+                                    : "Добавить локацию"}
                             </button>
                         </div>
                     </div>
