@@ -1,7 +1,4 @@
-const API_URL =
-    window.location.hostname === "localhost"
-        ? "http://localhost:8080"
-        : "/elibrary/api"
+const API_URL = import.meta.env.VITE_API_URL ?? "/elibrary/api"
 
 export class ApiError extends Error {
     status?: number
@@ -70,4 +67,3 @@ export async function requestJson<T>(
     const data = await parseJsonSafe(res)
     return data as T
 }
-
