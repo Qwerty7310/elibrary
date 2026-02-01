@@ -57,6 +57,9 @@ services:
       HTTP_ADDR: :8080
       IMAGES_PATH: /app/data/images
 
+    ports:
+      - "8080:8080"
+
     expose:
       - "8080"
 
