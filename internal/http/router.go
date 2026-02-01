@@ -22,12 +22,6 @@ import (
 func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	r := chi.NewRouter()
 
-	// ---------- Static images ----------
-	if cfg.ImagesURL != "" {
-		r.Handle(cfg.ImagesURL+"/*",
-			http.StripPrefix(cfg.ImagesURL, http.FileServer(http.Dir(cfg.ImagesPath))))
-	}
-
 	// ---------- CORS ----------
 	allowCredentials := true
 	for _, origin := range cfg.CORSAllowedOrigins {
@@ -50,6 +44,12 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+
+	// ---------- Static images ----------
+	if cfg.ImagesURL != "" {
+		r.Handle(cfg.ImagesURL+"/*",
+			http.StripPrefix(cfg.ImagesURL, http.FileServer(http.Dir(cfg.ImagesPath))))
+	}
 
 	// ----------  Repositories ----------
 	userRepo := postgres.NewUserRepository(db)
