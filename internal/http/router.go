@@ -6,6 +6,7 @@ import (
 	"elibrary/internal/http/handler"
 	"elibrary/internal/repository/postgres"
 	"elibrary/internal/service"
+	"elibrary/internal/storage/local"
 	"net/http"
 	"time"
 
@@ -20,6 +21,12 @@ import (
 
 func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	r := chi.NewRouter()
+
+	// ---------- Static images ----------
+	if cfg.ImagesURL != "" {
+		r.Handle(cfg.ImagesURL+"/*",
+			http.StripPrefix(cfg.ImagesURL, http.FileServer(http.Dir(cfg.ImagesPath))))
+	}
 
 	// ---------- CORS ----------
 	allowCredentials := true
@@ -55,6 +62,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	locationRepo := postgres.NewLocationRepository(db)
 	sequenceRepo := postgres.NewSequenceRepository(db)
 
+	imageStorage := local.NewImageStorage(cfg.ImagesPath, cfg.ImagesURL)
+
 	// ---------- Services ----------
 	jwtManager := &service.JWTManager{
 		Secret: []byte(cfg.JWTSecret),
@@ -70,6 +79,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	publisherService := service.NewPublisherService(publisherRepo)
 	locationService := service.NewLocationService(locationRepo, barcodeService)
 	userService := service.NewUserService(userRepo)
+	imageService := service.NewImageService(imageStorage)
 
 	// ---------- Handlers ----------
 	authHandler := handler.NewAuthHandler(authService)
@@ -82,6 +92,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	publisherHandler := handler.NewPublisherHandler(publisherService)
 	locationHandler := handler.NewLocationHandler(locationService)
 	userHandler := handler.NewUserHandler(userService)
+	imageHandler := handler.NewImageHandler(imageService)
 
 	// ---------- Public routes ----------
 	r.Get("/health", handler.Health)
@@ -130,6 +141,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 		// ---------- admin ----------
 		r.Route("/admin", func(r chi.Router) {
 			r.Use(httpMiddleware.RequireRole(auth.RoleAdmin))
+
+			r.Post("/{entity}/{id}/image", imageHandler.Upload)
 
 			r.Route("/users", func(r chi.Router) {
 				r.Get("/{id}", userHandler.GetByID)

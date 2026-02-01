@@ -5,6 +5,7 @@ import (
 	"elibrary/internal/storage"
 	"errors"
 	"io"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -47,23 +48,83 @@ func (s *ImageStorage) Save(ctx context.Context, entity storage.EntityType, enti
 		return "", err
 	}
 
-	publicURL := path.Join(
+	publicURL, err := joinBaseURL(
 		s.baseURL,
 		string(entity),
 		entityID.String(),
 		filename,
 	)
+	if err != nil {
+		return "", err
+	}
 
 	return publicURL, nil
 }
 
 func (s *ImageStorage) Delete(ctx context.Context, url string) error {
-	if !strings.HasPrefix(url, s.baseURL) {
+	rel, err := stripBaseURL(s.baseURL, url)
+	if err != nil {
+		return err
+	}
+
+	rel = filepath.Clean(rel)
+	rel = strings.TrimPrefix(rel, string(filepath.Separator))
+	if rel == "." || rel == "" || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
 		return errors.New("invalid image URL")
 	}
 
-	rel := strings.TrimPrefix(url, s.baseURL)
 	fullPath := filepath.Join(s.basePath, rel)
 
 	return os.Remove(fullPath)
+}
+
+func joinBaseURL(base string, parts ...string) (string, error) {
+	if base == "" {
+		return path.Join(parts...), nil
+	}
+	if u, err := url.Parse(base); err == nil && u.IsAbs() {
+		u.Path = path.Join(append([]string{u.Path}, parts...)...)
+		return u.String(), nil
+	}
+	return path.Join(append([]string{base}, parts...)...), nil
+}
+
+func stripBaseURL(base, full string) (string, error) {
+	if base == "" {
+		return strings.TrimPrefix(full, "/"), nil
+	}
+
+	baseURL, err := url.Parse(base)
+	if err == nil && baseURL.IsAbs() {
+		fullURL, err := url.Parse(full)
+		if err != nil || !fullURL.IsAbs() {
+			return "", errors.New("invalid image URL")
+		}
+		if !sameURLBase(baseURL, fullURL) {
+			return "", errors.New("invalid image URL")
+		}
+		basePath := path.Clean(baseURL.Path)
+		fullPath := path.Clean(fullURL.Path)
+		if !strings.HasPrefix(fullPath, basePath) {
+			return "", errors.New("invalid image URL")
+		}
+		rel := strings.TrimPrefix(fullPath, basePath)
+		return strings.TrimPrefix(rel, "/"), nil
+	}
+
+	if !strings.HasPrefix(full, base) {
+		return "", errors.New("invalid image URL")
+	}
+	rel := strings.TrimPrefix(full, base)
+	return strings.TrimPrefix(rel, "/"), nil
+}
+
+func sameURLBase(a, b *url.URL) bool {
+	if !strings.EqualFold(a.Scheme, b.Scheme) {
+		return false
+	}
+	if !strings.EqualFold(a.Host, b.Host) {
+		return false
+	}
+	return true
 }

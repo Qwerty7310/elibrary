@@ -12,6 +12,9 @@ type Config struct {
 	CORSAllowedOrigins []string
 
 	JWTSecret string
+
+	ImagesPath string
+	ImagesURL  string
 }
 
 func Load() *Config {
@@ -24,6 +27,9 @@ func Load() *Config {
 			"CORS_ALLOWED_ORIGINS",
 			[]string{"http://localhost:5173", "http://localhost:3000"},
 		),
+
+		ImagesPath: getEnv("IMAGES_PATH", "./data/images"),
+		ImagesURL:  getEnv("IMAGES_URL", "/static/images"),
 	}
 
 	log.Println("config loaded:", cfg.HTTPAddr)

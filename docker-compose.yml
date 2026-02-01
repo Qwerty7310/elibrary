@@ -55,9 +55,13 @@ services:
     environment:
       DB_URL: postgres://elibrary:elibrary@postgres:5432/elibrary?sslmode=disable
       HTTP_ADDR: :8080
+      IMAGES_PATH: /app/data/images
 
     expose:
       - "8080"
+
+    volumes:
+      - ./data/images:/app/data/images
 
     networks:
       - elibrary
