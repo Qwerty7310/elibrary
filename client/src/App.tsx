@@ -1,9 +1,14 @@
 import {useEffect, useMemo, useState} from "react"
 import "./App.css"
 import {loginUser} from "./api/auth"
-import {createBook, searchBooksInternal, searchBooksPublic} from "./api/books"
-import {createAuthor, getAuthorByID} from "./api/authors"
-import {createPublisher} from "./api/publishers"
+import {
+    createBook,
+    searchBooksInternal,
+    searchBooksPublic,
+    updateBook,
+} from "./api/books"
+import {createAuthor, getAuthorByID, updateAuthor} from "./api/authors"
+import {createPublisher, updatePublisher} from "./api/publishers"
 import {createWork} from "./api/works"
 import {
     createLocation,
@@ -19,6 +24,7 @@ import {ApiError, setToken} from "./api/http"
 import {getUserByID, updateUser} from "./api/users"
 import {SearchBar} from "./components/SearchBar"
 import {SafeImage} from "./components/SafeImage"
+import {uploadImage} from "./api/images"
 import type {
     Author,
     AuthorSummary,
@@ -160,6 +166,42 @@ function formatLocation(location?: BookInternal["location"]) {
     return `${parts.join(" · ")}${address}`
 }
 
+function formatLocationShort(location?: BookInternal["location"]) {
+    if (!location) {
+        return "—"
+    }
+    const name =
+        location.shelf_name ||
+        location.cabinet_name ||
+        location.room_name ||
+        location.building_name
+    const address = location.address ? `, ${location.address}` : ""
+    return `${name}${address}`
+}
+
+function formatDate(value?: string) {
+    if (!value) {
+        return ""
+    }
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) {
+        return value
+    }
+    const day = String(date.getUTCDate()).padStart(2, "0")
+    const month = String(date.getUTCMonth() + 1).padStart(2, "0")
+    const year = date.getUTCFullYear()
+    return `${day}.${month}.${year}`
+}
+
+function formatLifeDates(author: Author) {
+    const birth = formatDate(author.birth_date)
+    const death = formatDate(author.death_date)
+    if (!birth && !death) {
+        return ""
+    }
+    return `${birth || "—"} - ${death || "—"}`
+}
+
 function getCoverUrl(book: BookPublic) {
     const extra = book.extra ?? {}
     const cover = extra.cover_url
@@ -216,9 +258,8 @@ export default function App() {
 
     const [authorQuery, setAuthorQuery] = useState("")
     const [selectedAuthor, setSelectedAuthor] = useState<Author | null>(null)
+    const [selectedAuthorId, setSelectedAuthorId] = useState<string | null>(null)
     const [isAuthorInfoOpen, setIsAuthorInfoOpen] = useState(false)
-    const [authorBooks, setAuthorBooks] = useState<BookPublic[]>([])
-    const [authorBooksLoading, setAuthorBooksLoading] = useState(false)
 
     const [publisherQuery, setPublisherQuery] = useState("")
 
@@ -226,7 +267,9 @@ export default function App() {
     const [bookDraft, setBookDraft] = useState<BookDraft>(emptyBookDraft)
     const [bookError, setBookError] = useState<string | null>(null)
     const [bookSaving, setBookSaving] = useState(false)
+    const [coverFile, setCoverFile] = useState<File | null>(null)
     const [coverPreview, setCoverPreview] = useState<string | null>(null)
+    const [coverFileName, setCoverFileName] = useState("")
     const [isWorksPickerOpen, setIsWorksPickerOpen] = useState(true)
     const [selectedBuildingId, setSelectedBuildingId] = useState("")
     const [selectedRoomId, setSelectedRoomId] = useState("")
@@ -242,12 +285,20 @@ export default function App() {
     const [authorDraft, setAuthorDraft] = useState<AuthorDraft>(emptyAuthorDraft)
     const [authorError, setAuthorError] = useState<string | null>(null)
     const [authorSaving, setAuthorSaving] = useState(false)
+    const [authorPhotoFile, setAuthorPhotoFile] = useState<File | null>(null)
+    const [authorPhotoPreview, setAuthorPhotoPreview] = useState<string | null>(
+        null
+    )
 
     const [isPublisherModalOpen, setIsPublisherModalOpen] = useState(false)
     const [publisherDraft, setPublisherDraft] =
         useState<PublisherDraft>(emptyPublisherDraft)
     const [publisherError, setPublisherError] = useState<string | null>(null)
     const [publisherSaving, setPublisherSaving] = useState(false)
+    const [publisherLogoFile, setPublisherLogoFile] = useState<File | null>(null)
+    const [publisherLogoPreview, setPublisherLogoPreview] = useState<string | null>(
+        null
+    )
 
     const [isLocationModalOpen, setIsLocationModalOpen] = useState(false)
     const [locationDraft, setLocationDraft] =
@@ -381,6 +432,15 @@ export default function App() {
         )
     }, [authorQuery, authors])
 
+    const selectedAuthorWorks = useMemo(() => {
+        if (!selectedAuthorId) {
+            return []
+        }
+        return works.filter((work) =>
+            (work.authors ?? []).some((author) => author.id === selectedAuthorId)
+        )
+    }, [selectedAuthorId, works])
+
     const filteredPublishers = useMemo(() => {
         const needle = publisherQuery.trim().toLowerCase()
         if (!needle) {
@@ -471,6 +531,9 @@ export default function App() {
     }
 
     function handleLogout() {
+        if (!window.confirm("Вы действительно хотите выйти?")) {
+            return
+        }
         setAuthToken(null)
         setToken(null)
         setUser(null)
@@ -508,10 +571,10 @@ export default function App() {
         }
     }
 
-    async function handleWorkSelect(work: WorkShort) {
+    async function handleWorkSelect(work: WorkShort, openInfo = true) {
         setSelectedWork(work)
         setSelectedWorkDetail(work)
-        setIsWorkInfoOpen(true)
+        setIsWorkInfoOpen(openInfo)
         setWorkBooks([])
         setWorkBooksLoading(true)
         try {
@@ -526,24 +589,19 @@ export default function App() {
         }
     }
 
-    async function handleAuthorSelect(author: AuthorSummary) {
+    function handleAuthorSelect(author: AuthorSummary) {
+        setSelectedAuthorId(author.id)
+    }
+
+    async function handleAuthorInfoOpen(author: AuthorSummary) {
         setSelectedAuthor(null)
+        setSelectedAuthorId(author.id)
         setIsAuthorInfoOpen(true)
-        setAuthorBooks([])
-        setAuthorBooksLoading(true)
         try {
-            const [details, data] = await Promise.all([
-                getAuthorByID(author.id),
-                isAdmin
-                    ? searchBooksInternal(getAuthorName(author))
-                    : searchBooksPublic(getAuthorName(author)),
-            ])
+            const details = await getAuthorByID(author.id)
             setSelectedAuthor(details)
-            setAuthorBooks(data)
         } catch {
-            setAuthorBooks([])
-        } finally {
-            setAuthorBooksLoading(false)
+            setSelectedAuthor(null)
         }
     }
 
@@ -577,9 +635,32 @@ export default function App() {
             works: worksPayload,
         }
         try {
-            await createBook(payload)
+            const created = await createBook(payload)
+            if (coverFile) {
+                try {
+                    const coverUrl = await uploadImage(
+                        "book",
+                        created.id,
+                        coverFile
+                    )
+                    const extra = {
+                        ...(created.extra ?? {}),
+                        cover_url: coverUrl,
+                    }
+                    await updateBook(created.id, {extra})
+                } catch {
+                    setBookError(
+                        "Книга создана, но не удалось загрузить обложку"
+                    )
+                }
+            }
             setBookDraft(emptyBookDraft)
+            setCoverFile(null)
+            if (coverPreview) {
+                URL.revokeObjectURL(coverPreview)
+            }
             setCoverPreview(null)
+            setCoverFileName("")
             setIsBookModalOpen(false)
             if (booksQuery.trim()) {
                 await handleBookSearch(booksQuery)
@@ -652,8 +733,24 @@ export default function App() {
                 birth_date: authorDraft.birthDate || undefined,
                 death_date: authorDraft.deathDate || undefined,
                 bio: authorDraft.bio.trim() || undefined,
-                photo_url: authorDraft.photoUrl.trim() || undefined,
+                photo_url: authorPhotoFile
+                    ? undefined
+                    : authorDraft.photoUrl.trim() || undefined,
             })
+            if (authorPhotoFile) {
+                try {
+                    const photoUrl = await uploadImage(
+                        "author",
+                        created.id,
+                        authorPhotoFile
+                    )
+                    await updateAuthor(created.id, {photo_url: photoUrl})
+                } catch {
+                    setAuthorError(
+                        "Автор создан, но не удалось загрузить фото"
+                    )
+                }
+            }
             const summary = {
                 id: created.id,
                 last_name: created.last_name,
@@ -662,6 +759,11 @@ export default function App() {
             }
             setAuthors((prev) => [summary, ...prev])
             setAuthorDraft(emptyAuthorDraft)
+            setAuthorPhotoFile(null)
+            if (authorPhotoPreview) {
+                URL.revokeObjectURL(authorPhotoPreview)
+            }
+            setAuthorPhotoPreview(null)
             setIsAuthorModalOpen(false)
             if (isWorkModalOpen) {
                 setWorkDraft((prev) => ({
@@ -688,11 +790,34 @@ export default function App() {
         try {
             const created = await createPublisher({
                 name: publisherDraft.name.trim(),
-                logo_url: publisherDraft.logoUrl.trim() || undefined,
+                logo_url: publisherLogoFile
+                    ? undefined
+                    : publisherDraft.logoUrl.trim() || undefined,
                 web_url: publisherDraft.webUrl.trim() || undefined,
             })
-            setPublishers((prev) => [created, ...prev])
+            let updatedPublisher = created
+            if (publisherLogoFile) {
+                try {
+                    const logoUrl = await uploadImage(
+                        "publisher",
+                        created.id,
+                        publisherLogoFile
+                    )
+                    await updatePublisher(created.id, {logo_url: logoUrl})
+                    updatedPublisher = {...created, logo_url: logoUrl}
+                } catch {
+                    setPublisherError(
+                        "Издательство создано, но не удалось загрузить логотип"
+                    )
+                }
+            }
+            setPublishers((prev) => [updatedPublisher, ...prev])
             setPublisherDraft(emptyPublisherDraft)
+            setPublisherLogoFile(null)
+            if (publisherLogoPreview) {
+                URL.revokeObjectURL(publisherLogoPreview)
+            }
+            setPublisherLogoPreview(null)
             setIsPublisherModalOpen(false)
             if (isBookModalOpen) {
                 setBookDraft((prev) => ({
@@ -728,7 +853,10 @@ export default function App() {
                 parent_id: locationDraft.parentId || undefined,
                 type: locationDraft.type.trim(),
                 name: locationDraft.name.trim(),
-                address: locationDraft.address.trim() || undefined,
+                address:
+                    locationDraft.type === "building"
+                        ? locationDraft.address.trim() || undefined
+                        : undefined,
                 description: locationDraft.description.trim() || undefined,
             })
             setLocationByType((prev) => ({
@@ -971,7 +1099,6 @@ export default function App() {
                                 onClick={() => setActiveTab("profile")}
                             >
                                 {user.login || "Пользователь"}
-                                {isAdmin ? " · админ" : ""}
                             </button>
                             <button
                                 className="ghost-button"
@@ -1159,29 +1286,37 @@ export default function App() {
                             />
                             <div className="list">
                                 {filteredWorks.map((work) => (
-                                    <button
+                                    <div
                                         key={work.id}
                                         className={`list-item ${
                                             selectedWork?.id === work.id
                                                 ? "active"
                                                 : ""
                                         }`}
-                                        type="button"
-                                        onClick={() => handleWorkSelect(work)}
                                     >
-                                        <span>{work.title}</span>
-                                        <span className="item-meta">
-                                            {(() => {
-                                                const names = (work.authors ?? [])
-                                                    .map(getAuthorName)
-                                                    .join(", ")
-                                                const base = names || "Без автора"
-                                                return work.year
-                                                    ? `${base}, ${work.year}`
-                                                    : base
-                                            })()}
-                                        </span>
-                                    </button>
+                                        <div className="list-item-content">
+                                            <span>{work.title}</span>
+                                            <span className="item-meta">
+                                                {(() => {
+                                                    const names = (work.authors ?? [])
+                                                        .map(getAuthorName)
+                                                        .join(", ")
+                                                    const base = names || "Без автора"
+                                                    return work.year
+                                                        ? `${base}, ${work.year}`
+                                                        : base
+                                                })()}
+                                            </span>
+                                        </div>
+                                        <button
+                                            className="icon-button info-button"
+                                            type="button"
+                                            aria-label="Открыть информацию о произведении"
+                                            onClick={() => handleWorkSelect(work)}
+                                        >
+                                            <em>i</em>
+                                        </button>
+                                    </div>
                                 ))}
                             </div>
                         </div>
@@ -1201,7 +1336,7 @@ export default function App() {
                                         <span>{book.title}</span>
                                         {isAdmin && "location" in book && (
                                             <span className="item-meta">
-                                                {formatLocation(
+                                                {formatLocationShort(
                                                     (book as BookInternal)
                                                         .location
                                                 )}
@@ -1219,10 +1354,10 @@ export default function App() {
                 <section className="panel">
                     <div className="panel-header">
                         <div>
-                            <h2>Авторы и книги</h2>
+                            <h2>Авторы и произведения</h2>
                             <p className="results-caption">
-                                Ищите автора и узнавайте, в каких книгах он
-                                встречается.
+                                Ищите автора и узнавайте, в каких произведениях он
+                                участвует.
                             </p>
                         </div>
                         {isAdmin && (
@@ -1247,26 +1382,77 @@ export default function App() {
                                 placeholder="Фамилия или имя"
                             />
                             <div className="list">
-                                    {filteredAuthors.map((author) => (
+                                {filteredAuthors.map((author) => (
+                                    <div
+                                        key={author.id}
+                                        className={`list-item ${
+                                            selectedAuthorId === author.id
+                                                ? "active"
+                                                : ""
+                                        }`}
+                                    >
                                         <button
-                                            key={author.id}
-                                            className={`list-item ${
-                                                selectedAuthor?.id === author.id
-                                                    ? "active"
-                                                    : ""
-                                            }`}
+                                            className="list-item-button"
                                             type="button"
-                                            onClick={() => handleAuthorSelect(author)}
+                                            onClick={() =>
+                                                handleAuthorSelect(author)
+                                            }
                                         >
                                             <span>{getAuthorName(author)}</span>
                                         </button>
-                                    ))}
+                                        <button
+                                            className="icon-button info-button"
+                                            type="button"
+                                            aria-label="Открыть информацию об авторе"
+                                            onClick={() =>
+                                                handleAuthorInfoOpen(author)
+                                            }
+                                        >
+                                            <em>i</em>
+                                        </button>
+                                    </div>
+                                ))}
                             </div>
                         </div>
                         <div>
-                            <p className="status-line">
-                                Выберите автора слева, чтобы открыть карточку.
-                            </p>
+                            <h3 className="subheading">
+                                Произведения с этим автором
+                            </h3>
+                            {!selectedAuthorId && (
+                                <p className="status-line">
+                                    Выберите автора слева.
+                                </p>
+                            )}
+                            {selectedAuthorId &&
+                                selectedAuthorWorks.length === 0 && (
+                                <p className="status-line">Нет данных</p>
+                            )}
+                            <div className="stack">
+                                {selectedAuthorWorks.map((work) => (
+                                    <button
+                                        key={work.id}
+                                        className="list-item list-item-selectable"
+                                        type="button"
+                                        onClick={async () => {
+                                            setActiveTab("works")
+                                            await handleWorkSelect(work, false)
+                                        }}
+                                    >
+                                        <span>{work.title}</span>
+                                        <span className="item-meta">
+                                            {(() => {
+                                                const names = (work.authors ?? [])
+                                                    .map(getAuthorName)
+                                                    .join(", ")
+                                                const base = names || "Без автора"
+                                                return work.year
+                                                    ? `${base}, ${work.year}`
+                                                    : base
+                                            })()}
+                                        </span>
+                                    </button>
+                                ))}
+                            </div>
                         </div>
                     </div>
                 </section>
@@ -1304,7 +1490,10 @@ export default function App() {
                     </label>
                     <div className="card-grid">
                         {filteredPublishers.map((publisher) => (
-                            <article key={publisher.id} className="item-card">
+                            <article
+                                key={publisher.id}
+                                className="item-card publisher-card"
+                            >
                                 <div className="item-header">
                                     <SafeImage
                                         src={publisher.logo_url}
@@ -1313,16 +1502,6 @@ export default function App() {
                                     />
                                     <div>
                                         <h3>{publisher.name}</h3>
-                                        {publisher.web_url && (
-                                            <a
-                                                className="item-meta"
-                                                href={publisher.web_url}
-                                                target="_blank"
-                                                rel="noreferrer"
-                                            >
-                                                {publisher.web_url}
-                                            </a>
-                                        )}
                                     </div>
                                 </div>
                             </article>
@@ -1570,7 +1749,7 @@ export default function App() {
                         <div className="modal-header">
                             <h3>Вход</h3>
                             <button
-                                className="ghost-button"
+                                className="icon-button close-button"
                                 type="button"
                                 onClick={() => setIsLoginOpen(false)}
                             >
@@ -1626,7 +1805,7 @@ export default function App() {
                         <div className="modal-header">
                             <h3>Новая книга</h3>
                             <button
-                                className="ghost-button"
+                                className="icon-button close-button"
                                 type="button"
                                 onClick={() => setIsBookModalOpen(false)}
                             >
@@ -1891,27 +2070,46 @@ export default function App() {
                                         }
                                     />
                                 </label>
-                                <label className="field-label">
-                                    Обложка
-                                    <input
-                                        className="text-input"
-                                        type="file"
-                                        accept="image/*"
-                                        onChange={(event) => {
-                                            const file =
-                                                event.target.files?.[0] ?? null
-                                            if (!file) {
-                                                setCoverPreview(null)
-                                                return
-                                            }
-                                            const url = URL.createObjectURL(
-                                                file
-                                            )
-                                            setCoverPreview(url)
-                                        }}
-                                    />
+                                <div className="field-label">
+                                    <span>Обложка</span>
+                                    <div className="file-input">
+                                        <input
+                                            id="book-cover"
+                                            type="file"
+                                            accept="image/*"
+                                            onChange={(event) => {
+                                                const file =
+                                                    event.target.files?.[0] ?? null
+                                                if (coverPreview) {
+                                                    URL.revokeObjectURL(
+                                                        coverPreview
+                                                    )
+                                                }
+                                                if (!file) {
+                                                    setCoverFile(null)
+                                                    setCoverPreview(null)
+                                                    setCoverFileName("")
+                                                    return
+                                                }
+                                                const url =
+                                                    URL.createObjectURL(file)
+                                                setCoverFile(file)
+                                                setCoverPreview(url)
+                                                setCoverFileName(file.name)
+                                            }}
+                                        />
+                                        <label
+                                            className="ghost-button file-button"
+                                            htmlFor="book-cover"
+                                        >
+                                            Выбрать
+                                        </label>
+                                        <span className="item-meta file-name">
+                                            {coverFileName || "Файл не выбран"}
+                                        </span>
+                                    </div>
                                     <span className="item-meta">
-                                        Пока используется только для предпросмотра.
+                                        Файл будет загружен после сохранения книги.
                                     </span>
                                     {coverPreview && (
                                         <img
@@ -1920,7 +2118,7 @@ export default function App() {
                                             alt="Предпросмотр обложки"
                                         />
                                     )}
-                                </label>
+                                </div>
                                 <label className="field-label full">
                                     Описание
                                     <textarea
@@ -2035,7 +2233,7 @@ export default function App() {
                         <div className="modal-header">
                             <h3>Новое произведение</h3>
                             <button
-                                className="ghost-button"
+                                className="icon-button close-button"
                                 type="button"
                                 onClick={() => setIsWorkModalOpen(false)}
                             >
@@ -2168,7 +2366,7 @@ export default function App() {
                         <div className="modal-header">
                             <h3>Новый автор</h3>
                             <button
-                                className="ghost-button"
+                                className="icon-button close-button"
                                 type="button"
                                 onClick={() => setIsAuthorModalOpen(false)}
                             >
@@ -2244,19 +2442,55 @@ export default function App() {
                                         }
                                     />
                                 </label>
-                                <label className="field-label">
-                                    Фото (URL)
-                                    <input
-                                        className="text-input"
-                                        value={authorDraft.photoUrl}
-                                        onChange={(event) =>
-                                            setAuthorDraft((prev) => ({
-                                                ...prev,
-                                                photoUrl: event.target.value,
-                                            }))
-                                        }
-                                    />
-                                </label>
+                                <div className="field-label">
+                                    <span>Фото</span>
+                                    <div className="file-input">
+                                        <input
+                                            id="author-photo"
+                                            type="file"
+                                            accept="image/*"
+                                            onChange={(event) => {
+                                                const file =
+                                                    event.target.files?.[0] ?? null
+                                                if (authorPhotoPreview) {
+                                                    URL.revokeObjectURL(
+                                                        authorPhotoPreview
+                                                    )
+                                                }
+                                                if (!file) {
+                                                    setAuthorPhotoFile(null)
+                                                    setAuthorPhotoPreview(null)
+                                                    return
+                                                }
+                                                const url =
+                                                    URL.createObjectURL(file)
+                                                setAuthorPhotoFile(file)
+                                                setAuthorPhotoPreview(url)
+                                                setAuthorDraft((prev) => ({
+                                                    ...prev,
+                                                    photoUrl: "",
+                                                }))
+                                            }}
+                                        />
+                                        <label
+                                            className="ghost-button file-button"
+                                            htmlFor="author-photo"
+                                        >
+                                            Выбрать
+                                        </label>
+                                        <span className="item-meta file-name">
+                                            {authorPhotoFile?.name ||
+                                                "Файл не выбран"}
+                                        </span>
+                                    </div>
+                                    {authorPhotoPreview && (
+                                        <img
+                                            className="avatar"
+                                            src={authorPhotoPreview}
+                                            alt="Предпросмотр фото автора"
+                                        />
+                                    )}
+                                </div>
                                 <label className="field-label full">
                                     Биография
                                     <textarea
@@ -2295,7 +2529,7 @@ export default function App() {
                         <div className="modal-header">
                             <h3>Новое издательство</h3>
                             <button
-                                className="ghost-button"
+                                className="icon-button close-button"
                                 type="button"
                                 onClick={() => setIsPublisherModalOpen(false)}
                             >
@@ -2316,19 +2550,54 @@ export default function App() {
                                     }
                                 />
                             </label>
-                            <label className="field-label">
-                                Логотип (URL)
-                                <input
-                                    className="text-input"
-                                    value={publisherDraft.logoUrl}
-                                    onChange={(event) =>
-                                        setPublisherDraft((prev) => ({
-                                            ...prev,
-                                            logoUrl: event.target.value,
-                                        }))
-                                    }
-                                />
-                            </label>
+                            <div className="field-label">
+                                <span>Логотип</span>
+                                <div className="file-input">
+                                    <input
+                                        id="publisher-logo"
+                                        type="file"
+                                        accept="image/*"
+                                        onChange={(event) => {
+                                            const file =
+                                                event.target.files?.[0] ?? null
+                                            if (publisherLogoPreview) {
+                                                URL.revokeObjectURL(
+                                                    publisherLogoPreview
+                                                )
+                                            }
+                                            if (!file) {
+                                                setPublisherLogoFile(null)
+                                                setPublisherLogoPreview(null)
+                                                return
+                                            }
+                                            const url = URL.createObjectURL(file)
+                                            setPublisherLogoFile(file)
+                                            setPublisherLogoPreview(url)
+                                            setPublisherDraft((prev) => ({
+                                                ...prev,
+                                                logoUrl: "",
+                                            }))
+                                        }}
+                                    />
+                                    <label
+                                        className="ghost-button file-button"
+                                        htmlFor="publisher-logo"
+                                    >
+                                        Выбрать
+                                    </label>
+                                    <span className="item-meta file-name">
+                                        {publisherLogoFile?.name ||
+                                            "Файл не выбран"}
+                                    </span>
+                                </div>
+                                {publisherLogoPreview && (
+                                    <img
+                                        className="avatar"
+                                        src={publisherLogoPreview}
+                                        alt="Предпросмотр логотипа"
+                                    />
+                                )}
+                            </div>
                             <label className="field-label">
                                 Сайт
                                 <input
@@ -2368,7 +2637,7 @@ export default function App() {
                         <div className="modal-header">
                             <h3>Новая локация</h3>
                             <button
-                                className="ghost-button"
+                                className="icon-button close-button"
                                 type="button"
                                 onClick={() => setIsLocationModalOpen(false)}
                             >
@@ -2389,6 +2658,10 @@ export default function App() {
                                             ...prev,
                                             type: nextType,
                                             parentId: "",
+                                            address:
+                                                nextType === "building"
+                                                    ? prev.address
+                                                    : "",
                                             lockParent: false,
                                             lockType: prev.lockType,
                                         }))
@@ -2419,57 +2692,59 @@ export default function App() {
                                     }
                                 />
                             </label>
-                            <label className="field-label">
-                                Родитель
-                                <select
-                                    className={`text-input ${
-                                        locationDraft.parentId ? "" : "select-empty"
-                                    }`}
-                                    value={locationDraft.parentId}
-                                    onChange={(event) =>
-                                        setLocationDraft((prev) => ({
-                                            ...prev,
-                                            parentId: event.target.value,
-                                        }))
-                                    }
-                                    disabled={
-                                        !getParentType(locationDraft.type) ||
-                                        locationDraft.lockParent
-                                    }
-                                >
-                                    <option value="">
-                                        {getParentType(locationDraft.type)
-                                            ? "Не выбрано"
-                                            : "Не требуется"}
-                                    </option>
-                                    {(getParentType(locationDraft.type)
-                                        ? locationByType[
-                                              getParentType(locationDraft.type)!
-                                          ] ?? []
-                                        : []
-                                    ).map((location) => (
-                                        <option
-                                            key={location.id}
-                                            value={location.id}
-                                        >
-                                            {location.name}
+                            {getParentType(locationDraft.type) && (
+                                <label className="field-label">
+                                    Родитель
+                                    <select
+                                        className={`text-input ${
+                                            locationDraft.parentId
+                                                ? ""
+                                                : "select-empty"
+                                        }`}
+                                        value={locationDraft.parentId}
+                                        onChange={(event) =>
+                                            setLocationDraft((prev) => ({
+                                                ...prev,
+                                                parentId: event.target.value,
+                                            }))
+                                        }
+                                        disabled={locationDraft.lockParent}
+                                    >
+                                        <option value="">
+                                            Не выбрано
                                         </option>
-                                    ))}
-                                </select>
-                            </label>
-                            <label className="field-label">
-                                Адрес
-                                <input
-                                    className="text-input"
-                                    value={locationDraft.address}
-                                    onChange={(event) =>
-                                        setLocationDraft((prev) => ({
-                                            ...prev,
-                                            address: event.target.value,
-                                        }))
-                                    }
-                                />
-                            </label>
+                                        {(
+                                            locationByType[
+                                                getParentType(
+                                                    locationDraft.type
+                                                )!
+                                            ] ?? []
+                                        ).map((location) => (
+                                            <option
+                                                key={location.id}
+                                                value={location.id}
+                                            >
+                                                {location.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </label>
+                            )}
+                            {locationDraft.type === "building" && (
+                                <label className="field-label">
+                                    Адрес
+                                    <input
+                                        className="text-input"
+                                        value={locationDraft.address}
+                                        onChange={(event) =>
+                                            setLocationDraft((prev) => ({
+                                                ...prev,
+                                                address: event.target.value,
+                                            }))
+                                        }
+                                    />
+                                </label>
+                            )}
                             <label className="field-label">
                                 Описание
                                 <textarea
@@ -2507,9 +2782,20 @@ export default function App() {
                 <div className="modal-backdrop">
                     <div className="modal">
                         <div className="modal-header">
-                            <h3>Автор</h3>
+                            <div>
+                                <h3>
+                                    {selectedAuthor
+                                        ? getAuthorName(selectedAuthor)
+                                        : "Загрузка..."}
+                                </h3>
+                                {selectedAuthor && (
+                                    <p className="item-meta author-life">
+                                        {formatLifeDates(selectedAuthor)}
+                                    </p>
+                                )}
+                            </div>
                             <button
-                                className="ghost-button"
+                                className="icon-button close-button"
                                 type="button"
                                 onClick={() => setIsAuthorInfoOpen(false)}
                             >
@@ -2519,57 +2805,33 @@ export default function App() {
                         <div className="modal-body">
                             {selectedAuthor ? (
                                 <div className="stack">
-                                    <div className="author-card">
+                                    {selectedAuthor.photo_url && (
                                         <SafeImage
                                             src={selectedAuthor.photo_url}
                                             alt={getAuthorName(selectedAuthor)}
                                             className="avatar"
                                         />
-                                        <div>
-                                            <p className="author-name">
-                                                {getAuthorName(selectedAuthor)}
-                                            </p>
+                                    )}
+                                    <div>
+                                        <div className="stack author-info-stack">
+                                            {selectedAuthor.middle_name && (
+                                                <p>
+                                                    <strong>Отчество:</strong>{" "}
+                                                    {selectedAuthor.middle_name}
+                                                </p>
+                                            )}
                                             {selectedAuthor.bio && (
-                                                <p className="item-meta">
+                                                <p>
+                                                    <strong>Биография:</strong>{" "}
                                                     {selectedAuthor.bio}
                                                 </p>
                                             )}
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <h4 className="subheading">
-                                            Книги, связанные с автором
-                                        </h4>
-                                        {authorBooksLoading && (
-                                            <p className="status-line">
-                                                Загрузка...
-                                            </p>
-                                        )}
-                                        {!authorBooksLoading &&
-                                            authorBooks.length === 0 && (
-                                            <p className="status-line">
-                                                Нет данных
-                                            </p>
-                                        )}
-                                        <div className="stack">
-                                            {authorBooks.map((book) => (
-                                                <div
-                                                    key={book.id}
-                                                    className="mini-card"
-                                                >
-                                                    <span>{book.title}</span>
-                                                    {isAdmin &&
-                                                        "location" in book && (
-                                                            <span className="item-meta">
-                                                                {formatLocation(
-                                                                    (
-                                                                        book as BookInternal
-                                                                    ).location
-                                                                )}
-                                                            </span>
-                                                        )}
-                                                </div>
-                                            ))}
+                                            {selectedAuthor.photo_url && (
+                                                <p>
+                                                    <strong>Фото:</strong>{" "}
+                                                    {selectedAuthor.photo_url}
+                                                </p>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
@@ -2587,7 +2849,7 @@ export default function App() {
                         <div className="modal-header">
                             <h3>Произведение</h3>
                             <button
-                                className="ghost-button"
+                                className="icon-button close-button"
                                 type="button"
                                 onClick={() => setIsWorkInfoOpen(false)}
                             >

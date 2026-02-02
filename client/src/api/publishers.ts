@@ -12,7 +12,17 @@ export function createPublisher(payload: {
     })
 }
 
+export function updatePublisher(id: string, payload: {
+    name?: string
+    logo_url?: string
+    web_url?: string
+}) {
+    return requestJson<void>(`/admin/publishers/${encodeURIComponent(id)}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+    })
+}
+
 export function getPublisherByID(id: string) {
     return requestJson<Publisher>(`/publishers/${encodeURIComponent(id)}`)
 }
-

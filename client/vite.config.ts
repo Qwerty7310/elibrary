@@ -11,6 +11,8 @@ export default defineConfig({
                   "/elibrary/api": {
                       target: process.env.VITE_API_PROXY_TARGET,
                       changeOrigin: true,
+                      rewrite: (path) =>
+                          path.replace(/^\/elibrary\/api/, ""),
                   },
               },
           }

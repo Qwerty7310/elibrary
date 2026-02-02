@@ -49,3 +49,22 @@ export async function createBook(payload: {
         body: JSON.stringify(payload),
     })
 }
+
+export async function updateBook(
+    id: string,
+    payload: {
+        title?: string
+        publisher_id?: string
+        year?: number
+        description?: string
+        location_id?: string
+        factory_barcode?: string
+        extra?: Record<string, unknown>
+        works?: BookWorkInput[]
+    }
+): Promise<void> {
+    return requestJson<void>(`/admin/books/${encodeURIComponent(id)}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+    })
+}

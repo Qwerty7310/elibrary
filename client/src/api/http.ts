@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL ?? "/elibrary/api"
+export const API_URL = import.meta.env.VITE_API_URL ?? "/elibrary/api"
 
 export class ApiError extends Error {
     status?: number
@@ -53,6 +53,40 @@ export async function requestJson<T>(
     const res = await fetch(`${API_URL}${path}`, {
         ...options,
         headers,
+    })
+
+    if (!res.ok) {
+        const data = await parseJsonSafe(res)
+        const message =
+            (data && typeof data === "object" && "error" in data
+                ? String((data as {error: string}).error)
+                : undefined) || `request failed: ${res.status}`
+        throw new ApiError(message, res.status)
+    }
+
+    const data = await parseJsonSafe(res)
+    return data as T
+}
+
+export async function requestForm<T>(
+    path: string,
+    form: FormData,
+    options: RequestInit = {},
+    withAuth = true
+): Promise<T> {
+    const headers = new Headers(options.headers)
+    if (withAuth) {
+        const token = getToken()
+        if (token) {
+            headers.set("Authorization", `Bearer ${token}`)
+        }
+    }
+
+    const res = await fetch(`${API_URL}${path}`, {
+        method: options.method ?? "POST",
+        ...options,
+        headers,
+        body: form,
     })
 
     if (!res.ok) {
