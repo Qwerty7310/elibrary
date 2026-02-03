@@ -8,7 +8,12 @@ import {
     updateBook,
 } from "./api/books"
 import {createAuthor, getAuthorByID, updateAuthor} from "./api/authors"
-import {createPublisher, updatePublisher} from "./api/publishers"
+import {
+    createPublisher,
+    deletePublisher,
+    getPublisherByID,
+    updatePublisher,
+} from "./api/publishers"
 import {createWork} from "./api/works"
 import {
     createLocation,
@@ -22,7 +27,6 @@ import {
 } from "./api/reference"
 import {ApiError, setToken} from "./api/http"
 import {getUserByID, updateUser} from "./api/users"
-import {SearchBar} from "./components/SearchBar"
 import {SafeImage} from "./components/SafeImage"
 import {uploadImage} from "./api/images"
 import type {
@@ -147,9 +151,16 @@ function parseJwt(token: string) {
 }
 
 function getAuthorName(author: AuthorSummary) {
-    return [author.last_name, author.first_name, author.middle_name]
-        .filter(Boolean)
-        .join(" ")
+    const last = author.last_name?.trim()
+    const first = author.first_name?.trim()
+    const middle = author.middle_name?.trim()
+    if (!last) {
+        return [first, middle].filter(Boolean).join(" ")
+    }
+    if (!middle) {
+        return [first, last].filter(Boolean).join(" ")
+    }
+    return [last, first, middle].filter(Boolean).join(" ")
 }
 
 function formatLocation(location?: BookInternal["location"]) {
@@ -193,6 +204,23 @@ function formatDate(value?: string) {
     return `${day}.${month}.${year}`
 }
 
+function formatDateTime(value?: string) {
+    if (!value) {
+        return ""
+    }
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) {
+        return value
+    }
+    return date.toLocaleString("ru-RU", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+    })
+}
+
 function formatLifeDates(author: Author) {
     const birth = formatDate(author.birth_date)
     const death = formatDate(author.death_date)
@@ -202,10 +230,50 @@ function formatLifeDates(author: Author) {
     return `${birth || "—"} - ${death || "—"}`
 }
 
+function getEntityImagePath(entity: "author" | "publisher" | "book", id: string) {
+    return `/static/images/${entity}/${id}/photo.jpg`
+}
+
+function withCacheBust(url: string) {
+    const stamp = Date.now()
+    return url.includes("?") ? `${url}&v=${stamp}` : `${url}?v=${stamp}`
+}
+
 function getCoverUrl(book: BookPublic) {
     const extra = book.extra ?? {}
     const cover = extra.cover_url
-    return typeof cover === "string" ? cover : null
+    if (typeof cover === "string" && cover.trim()) {
+        return cover
+    }
+    return getEntityImagePath("book", book.id)
+}
+
+function getBookSearchText(book: BookPublic) {
+    const parts: string[] = []
+    if (book.title) {
+        parts.push(book.title)
+    }
+    if (book.barcode) {
+        parts.push(book.barcode)
+    }
+    if (book.factory_barcode) {
+        parts.push(book.factory_barcode)
+    }
+    if (book.publisher?.name) {
+        parts.push(book.publisher.name)
+    }
+    if (book.works?.length) {
+        parts.push(...book.works.map((work) => work.title))
+        parts.push(
+            ...book.works.flatMap((work) =>
+                (work.authors ?? []).map(getAuthorName)
+            )
+        )
+    }
+    if (book.description) {
+        parts.push(book.description)
+    }
+    return parts.join(" ").toLowerCase()
 }
 
 export default function App() {
@@ -247,6 +315,9 @@ export default function App() {
     const [books, setBooks] = useState<BookPublic[]>([])
     const [booksError, setBooksError] = useState<string | null>(null)
     const [booksLoading, setBooksLoading] = useState(false)
+    const [selectedBook, setSelectedBook] = useState<BookPublic | null>(null)
+    const [isBookInfoOpen, setIsBookInfoOpen] = useState(false)
+    const [editingBookId, setEditingBookId] = useState<string | null>(null)
 
     const [workQuery, setWorkQuery] = useState("")
     const [selectedWork, setSelectedWork] = useState<WorkShort | null>(null)
@@ -262,6 +333,45 @@ export default function App() {
     const [isAuthorInfoOpen, setIsAuthorInfoOpen] = useState(false)
 
     const [publisherQuery, setPublisherQuery] = useState("")
+    const [selectedPublisher, setSelectedPublisher] = useState<Publisher | null>(
+        null
+    )
+    const [isPublisherInfoOpen, setIsPublisherInfoOpen] = useState(false)
+    const [publisherInfoError, setPublisherInfoError] = useState<string | null>(
+        null
+    )
+    const [publisherInfoSaving, setPublisherInfoSaving] = useState(false)
+    const [isPublisherEditOpen, setIsPublisherEditOpen] = useState(false)
+    const [publisherEditDraft, setPublisherEditDraft] = useState({
+        name: "",
+        webUrl: "",
+    })
+    const [publisherEditLogoFile, setPublisherEditLogoFile] =
+        useState<File | null>(null)
+    const [publisherEditLogoPreview, setPublisherEditLogoPreview] =
+        useState<string | null>(null)
+    const [publisherEditSaving, setPublisherEditSaving] = useState(false)
+    const [publisherEditError, setPublisherEditError] = useState<string | null>(
+        null
+    )
+
+    const filteredBooks = useMemo(() => {
+        if (!booksQuery.trim()) {
+            return books
+        }
+        const terms = booksQuery
+            .toLowerCase()
+            .split(" ")
+            .map((term) => term.trim())
+            .filter(Boolean)
+        if (terms.length === 0) {
+            return books
+        }
+        return books.filter((book) => {
+            const haystack = getBookSearchText(book)
+            return terms.every((term) => haystack.includes(term))
+        })
+    }, [books, booksQuery])
 
     const [isBookModalOpen, setIsBookModalOpen] = useState(false)
     const [bookDraft, setBookDraft] = useState<BookDraft>(emptyBookDraft)
@@ -270,7 +380,7 @@ export default function App() {
     const [coverFile, setCoverFile] = useState<File | null>(null)
     const [coverPreview, setCoverPreview] = useState<string | null>(null)
     const [coverFileName, setCoverFileName] = useState("")
-    const [isWorksPickerOpen, setIsWorksPickerOpen] = useState(true)
+    const [workSearch, setWorkSearch] = useState("")
     const [selectedBuildingId, setSelectedBuildingId] = useState("")
     const [selectedRoomId, setSelectedRoomId] = useState("")
     const [selectedCabinetId, setSelectedCabinetId] = useState("")
@@ -289,6 +399,23 @@ export default function App() {
     const [authorPhotoPreview, setAuthorPhotoPreview] = useState<string | null>(
         null
     )
+    const [authorInfoSaving, setAuthorInfoSaving] = useState(false)
+    const [authorInfoError, setAuthorInfoError] = useState<string | null>(null)
+    const [isAuthorEditOpen, setIsAuthorEditOpen] = useState(false)
+    const [authorEditDraft, setAuthorEditDraft] = useState({
+        lastName: "",
+        firstName: "",
+        middleName: "",
+        birthDate: "",
+        deathDate: "",
+        bio: "",
+    })
+    const [authorEditPhotoFile, setAuthorEditPhotoFile] =
+        useState<File | null>(null)
+    const [authorEditPhotoPreview, setAuthorEditPhotoPreview] =
+        useState<string | null>(null)
+    const [authorEditSaving, setAuthorEditSaving] = useState(false)
+    const [authorEditError, setAuthorEditError] = useState<string | null>(null)
 
     const [isPublisherModalOpen, setIsPublisherModalOpen] = useState(false)
     const [publisherDraft, setPublisherDraft] =
@@ -401,16 +528,25 @@ export default function App() {
     }, [token])
 
     useEffect(() => {
+        if (!token || activeTab !== "books" || books.length > 0) {
+            return
+        }
+        void loadBooksAll()
+    }, [token, activeTab, books.length])
+
+    useEffect(() => {
         if (isBookModalOpen && token) {
             loadBuildingLocations()
-            setSelectedBuildingId("")
-            setSelectedRoomId("")
-            setSelectedCabinetId("")
-            setSelectedShelfId("")
-            setBookDraft((prev) => ({...prev, locationId: ""}))
-            setIsWorksPickerOpen(true)
+            if (!editingBookId) {
+                setSelectedBuildingId("")
+                setSelectedRoomId("")
+                setSelectedCabinetId("")
+                setSelectedShelfId("")
+                setBookDraft((prev) => ({...prev, locationId: ""}))
+            }
+            setWorkSearch("")
         }
-    }, [isBookModalOpen, token])
+    }, [isBookModalOpen, token, editingBookId])
 
     const filteredWorks = useMemo(() => {
         const needle = workQuery.trim().toLowerCase()
@@ -544,31 +680,28 @@ export default function App() {
         setBooks([])
     }
 
-    async function handleBookSearch(value: string) {
+    async function loadBooksAll() {
         if (!token) {
             setIsLoginOpen(true)
             return
         }
-        setBooksQuery(value)
-        setBooksError(null)
-        if (!value.trim()) {
-            setBooks([])
-            return
-        }
         setBooksLoading(true)
+        setBooksError(null)
         try {
             const data = isAdmin
-                ? await searchBooksInternal(value)
-                : await searchBooksPublic(value)
+                ? await searchBooksInternal("")
+                : await searchBooksPublic("")
             setBooks(data)
-            if (data.length === 0) {
-                setBooksError("Ничего не найдено")
-            }
         } catch {
-            setBooksError("Не удалось выполнить поиск")
+            setBooksError("Не удалось загрузить список книг")
         } finally {
             setBooksLoading(false)
         }
+    }
+
+    function handleBookQueryChange(value: string) {
+        const normalized = value.replace(/\s+/g, " ").trimStart()
+        setBooksQuery(normalized)
     }
 
     async function handleWorkSelect(work: WorkShort, openInfo = true) {
@@ -597,6 +730,7 @@ export default function App() {
         setSelectedAuthor(null)
         setSelectedAuthorId(author.id)
         setIsAuthorInfoOpen(true)
+        setAuthorInfoError(null)
         try {
             const details = await getAuthorByID(author.id)
             setSelectedAuthor(details)
@@ -605,7 +739,134 @@ export default function App() {
         }
     }
 
+    function openAuthorEdit(author: Author) {
+        setIsAuthorInfoOpen(false)
+        setAuthorEditDraft({
+            lastName: author.last_name ?? "",
+            firstName: author.first_name ?? "",
+            middleName: author.middle_name ?? "",
+            birthDate: author.birth_date ? author.birth_date.slice(0, 10) : "",
+            deathDate: author.death_date ? author.death_date.slice(0, 10) : "",
+            bio: author.bio ?? "",
+        })
+        setAuthorEditPhotoFile(null)
+        if (authorEditPhotoPreview) {
+            URL.revokeObjectURL(authorEditPhotoPreview)
+        }
+        setAuthorEditPhotoPreview(null)
+        setAuthorEditError(null)
+        setIsAuthorEditOpen(true)
+    }
+
+    async function handlePublisherInfoOpen(publisher: Publisher) {
+        setSelectedPublisher(null)
+        setIsPublisherInfoOpen(true)
+        setPublisherInfoError(null)
+        try {
+            const details = await getPublisherByID(publisher.id)
+            setSelectedPublisher(details)
+        } catch {
+            setSelectedPublisher(null)
+        }
+    }
+
+    function openPublisherEdit(publisher: Publisher) {
+        setPublisherEditDraft({
+            name: publisher.name ?? "",
+            webUrl: publisher.web_url ?? "",
+        })
+        setPublisherEditLogoFile(null)
+        if (publisherEditLogoPreview) {
+            URL.revokeObjectURL(publisherEditLogoPreview)
+        }
+        setPublisherEditLogoPreview(null)
+        setPublisherEditError(null)
+        setIsPublisherEditOpen(true)
+    }
+
+    async function openBookInfo(book: BookPublic) {
+        setSelectedBook(book)
+        setIsBookInfoOpen(true)
+        if (!isAdmin || !token) {
+            return
+        }
+        try {
+            const internalBooks = await searchBooksInternal("")
+            const found = internalBooks.find((item) => item.id === book.id)
+            if (found) {
+                setSelectedBook(found)
+            }
+        } catch {
+            // keep public data if internal fetch fails
+        }
+    }
+
+    function applyBookLocation(location?: BookInternal["location"]) {
+        const buildingId = location?.building_id ?? ""
+        const roomId = location?.room_id ?? ""
+        const cabinetId = location?.cabinet_id ?? ""
+        const shelfId = location?.shelf_id ?? ""
+        const locationId = shelfId || cabinetId || roomId || buildingId || ""
+        setSelectedBuildingId(buildingId)
+        setSelectedRoomId(roomId)
+        setSelectedCabinetId(cabinetId)
+        setSelectedShelfId(shelfId)
+        if (buildingId) {
+            void loadChildren(buildingId, "room", true)
+        }
+        if (roomId) {
+            void loadChildren(roomId, "cabinet", true)
+        }
+        if (cabinetId) {
+            void loadChildren(cabinetId, "shelf", true)
+        }
+        return locationId
+    }
+
+    async function openBookEdit(book: BookPublic) {
+        if (!isAdmin) {
+            return
+        }
+        let details: BookInternal | BookPublic = book
+        let location =
+            "location" in book && book.location ? book.location : undefined
+        if (!location && token) {
+            try {
+                const internalBooks = await searchBooksInternal("")
+                const found = internalBooks.find((item) => item.id === book.id)
+                if (found) {
+                    details = found
+                    location = found.location
+                }
+            } catch {
+                // fallback to provided book data
+            }
+        }
+        setSelectedBook(details)
+        const locationId = applyBookLocation(location)
+        setEditingBookId(book.id)
+        setBookDraft({
+            title: book.title ?? "",
+            publisherId: book.publisher?.id ?? "",
+            year: book.year ? String(book.year) : "",
+            description: book.description ?? "",
+            locationId,
+            factoryBarcode: book.factory_barcode ?? "",
+            workIds: (book.works ?? []).map((work) => work.id),
+        })
+        setCoverFile(null)
+        if (coverPreview) {
+            URL.revokeObjectURL(coverPreview)
+        }
+        setCoverPreview(null)
+        setCoverFileName("")
+        setWorkSearch("")
+        setIsBookModalOpen(true)
+        setIsBookInfoOpen(false)
+    }
+
     async function handleCreateBook() {
+        const isEditing = Boolean(editingBookId)
         if (!bookDraft.title.trim()) {
             setBookError("Название книги обязательно")
             return
@@ -622,36 +883,53 @@ export default function App() {
                 position: index + 1,
             })
         )
-        const payload = {
-            book: {
-                title: bookDraft.title.trim(),
-                publisher_id: bookDraft.publisherId || undefined,
-                year: bookDraft.year ? Number(bookDraft.year) : undefined,
-                description: bookDraft.description.trim() || undefined,
-                location_id: bookDraft.locationId || undefined,
-                factory_barcode: bookDraft.factoryBarcode.trim() || undefined,
-                extra: undefined,
-            },
-            works: worksPayload,
+        const bookPayload = {
+            title: bookDraft.title.trim(),
+            publisher_id: bookDraft.publisherId || undefined,
+            year: bookDraft.year ? Number(bookDraft.year) : undefined,
+            description: bookDraft.description.trim() || undefined,
+            location_id: bookDraft.locationId || undefined,
+            factory_barcode: bookDraft.factoryBarcode.trim() || undefined,
         }
         try {
-            const created = await createBook(payload)
-            if (coverFile) {
-                try {
+            if (isEditing && editingBookId) {
+                await updateBook(editingBookId, {
+                    ...bookPayload,
+                    works: worksPayload,
+                })
+                if (coverFile) {
                     const coverUrl = await uploadImage(
                         "book",
-                        created.id,
+                        editingBookId,
                         coverFile
                     )
-                    const extra = {
-                        ...(created.extra ?? {}),
-                        cover_url: coverUrl,
+                    await updateBook(editingBookId, {extra: {cover_url: coverUrl}})
+                }
+            } else {
+                const created = await createBook({
+                    book: {
+                        ...bookPayload,
+                        extra: undefined,
+                    },
+                    works: worksPayload,
+                })
+                if (coverFile) {
+                    try {
+                        const coverUrl = await uploadImage(
+                            "book",
+                            created.id,
+                            coverFile
+                        )
+                        const extra = {
+                            ...(created.extra ?? {}),
+                            cover_url: coverUrl,
+                        }
+                        await updateBook(created.id, {extra})
+                    } catch {
+                        setBookError(
+                            "Книга создана, но не удалось загрузить обложку"
+                        )
                     }
-                    await updateBook(created.id, {extra})
-                } catch {
-                    setBookError(
-                        "Книга создана, но не удалось загрузить обложку"
-                    )
                 }
             }
             setBookDraft(emptyBookDraft)
@@ -662,11 +940,12 @@ export default function App() {
             setCoverPreview(null)
             setCoverFileName("")
             setIsBookModalOpen(false)
-            if (booksQuery.trim()) {
-                await handleBookSearch(booksQuery)
-            }
+            setEditingBookId(null)
+            await loadBooksAll()
         } catch {
-            setBookError("Не удалось создать книгу")
+            setBookError(
+                isEditing ? "Не удалось обновить книгу" : "Не удалось создать книгу"
+            )
         } finally {
             setBookSaving(false)
         }
@@ -745,6 +1024,7 @@ export default function App() {
                         authorPhotoFile
                     )
                     await updateAuthor(created.id, {photo_url: photoUrl})
+                    created.photo_url = withCacheBust(photoUrl)
                 } catch {
                     setAuthorError(
                         "Автор создан, но не удалось загрузить фото"
@@ -804,7 +1084,10 @@ export default function App() {
                         publisherLogoFile
                     )
                     await updatePublisher(created.id, {logo_url: logoUrl})
-                    updatedPublisher = {...created, logo_url: logoUrl}
+                    updatedPublisher = {
+                        ...created,
+                        logo_url: withCacheBust(logoUrl),
+                    }
                 } catch {
                     setPublisherError(
                         "Издательство создано, но не удалось загрузить логотип"
@@ -829,6 +1112,136 @@ export default function App() {
             setPublisherError("Не удалось создать издательство")
         } finally {
             setPublisherSaving(false)
+        }
+    }
+
+    async function handleAuthorEditSave() {
+        if (!selectedAuthor) {
+            return
+        }
+        if (!authorEditDraft.lastName.trim()) {
+            setAuthorEditError("Фамилия обязательна")
+            return
+        }
+        setAuthorEditSaving(true)
+        setAuthorEditError(null)
+        try {
+            await updateAuthor(selectedAuthor.id, {
+                last_name: authorEditDraft.lastName.trim(),
+                first_name: authorEditDraft.firstName.trim() || undefined,
+                middle_name: authorEditDraft.middleName.trim() || undefined,
+                birth_date: authorEditDraft.birthDate || undefined,
+                death_date: authorEditDraft.deathDate || undefined,
+                bio: authorEditDraft.bio.trim() || undefined,
+            })
+            let photoUrl = selectedAuthor.photo_url
+            if (authorEditPhotoFile) {
+                const uploadedUrl = await uploadImage(
+                    "author",
+                    selectedAuthor.id,
+                    authorEditPhotoFile
+                )
+                await updateAuthor(selectedAuthor.id, {photo_url: uploadedUrl})
+                photoUrl = withCacheBust(uploadedUrl)
+            }
+            const updated = {
+                ...selectedAuthor,
+                last_name: authorEditDraft.lastName.trim(),
+                first_name: authorEditDraft.firstName.trim() || undefined,
+                middle_name: authorEditDraft.middleName.trim() || undefined,
+                birth_date: authorEditDraft.birthDate || undefined,
+                death_date: authorEditDraft.deathDate || undefined,
+                bio: authorEditDraft.bio.trim() || undefined,
+                photo_url: photoUrl,
+            }
+            setSelectedAuthor(updated)
+            setAuthors((prev) =>
+                prev.map((author) =>
+                    author.id === selectedAuthor.id
+                        ? {
+                              ...author,
+                              last_name: updated.last_name,
+                              first_name: updated.first_name,
+                              middle_name: updated.middle_name,
+                              photo_url: updated.photo_url,
+                          }
+                        : author
+                )
+            )
+            setIsAuthorEditOpen(false)
+        } catch {
+            setAuthorEditError("Не удалось обновить автора")
+        } finally {
+            setAuthorEditSaving(false)
+        }
+    }
+
+
+    async function handlePublisherEditSave() {
+        if (!selectedPublisher) {
+            return
+        }
+        if (!publisherEditDraft.name.trim()) {
+            setPublisherEditError("Название издательства обязательно")
+            return
+        }
+        setPublisherEditSaving(true)
+        setPublisherEditError(null)
+        try {
+            const payload = {
+                name: publisherEditDraft.name.trim(),
+                web_url: publisherEditDraft.webUrl.trim() || undefined,
+            }
+            await updatePublisher(selectedPublisher.id, payload)
+            let logoUrl = selectedPublisher.logo_url
+            if (publisherEditLogoFile) {
+                const uploadedUrl = await uploadImage(
+                    "publisher",
+                    selectedPublisher.id,
+                    publisherEditLogoFile
+                )
+                await updatePublisher(selectedPublisher.id, {logo_url: uploadedUrl})
+                logoUrl = withCacheBust(uploadedUrl)
+            }
+            const updated = {
+                ...selectedPublisher,
+                name: payload.name,
+                web_url: payload.web_url,
+                logo_url: logoUrl,
+            }
+            setSelectedPublisher(updated)
+            setPublishers((prev) =>
+                prev.map((publisher) =>
+                    publisher.id === selectedPublisher.id
+                        ? {...publisher, ...updated}
+                        : publisher
+                )
+            )
+            setIsPublisherEditOpen(false)
+        } catch {
+            setPublisherEditError("Не удалось обновить издательство")
+        } finally {
+            setPublisherEditSaving(false)
+        }
+    }
+
+    async function handlePublisherDelete() {
+        if (!selectedPublisher) {
+            return
+        }
+        setPublisherInfoSaving(true)
+        setPublisherInfoError(null)
+        try {
+            await deletePublisher(selectedPublisher.id)
+            setPublishers((prev) =>
+                prev.filter((publisher) => publisher.id !== selectedPublisher.id)
+            )
+            setSelectedPublisher(null)
+            setIsPublisherInfoOpen(false)
+        } catch {
+            setPublisherInfoError("Не удалось удалить издательство")
+        } finally {
+            setPublisherInfoSaving(false)
         }
     }
 
@@ -994,6 +1407,14 @@ export default function App() {
         setIsLocationModalOpen(true)
     }
 
+    function getLocationTypeLabel(type: string) {
+        if (type === "building") return "Здание"
+        if (type === "room") return "Комната"
+        if (type === "cabinet") return "Шкаф"
+        if (type === "shelf") return "Полка"
+        return "Локация"
+    }
+
     function renderLocationNode(location: LocationEntity, level = 0) {
         const childType = getChildType(location.type)
         const isExpanded = expandedLocations.has(location.id)
@@ -1003,44 +1424,60 @@ export default function App() {
         return (
             <div key={location.id} className="location-node">
                 <div className="location-row">
-                    {childType ? (
-                        <button
-                            className={`icon-button ${
-                                isExpanded ? "icon-rotated" : ""
-                            }`}
-                            type="button"
-                            onClick={() => toggleLocation(location)}
-                            aria-label={
-                                isExpanded
-                                    ? "Свернуть"
-                                    : "Развернуть"
-                            }
-                        >
-                            ▸
-                        </button>
-                    ) : (
-                        <span className="icon-placeholder" />
-                    )}
-                    <span className="location-name">
-                        {location.name}
-                    </span>
-                    {location.type === "building" && location.address && (
-                        <span className="location-address">
-                            {location.address}
-                        </span>
-                    )}
-                    {childType && (
-                        <button
-                            className="icon-plus-button"
-                            type="button"
-                            onClick={() =>
-                                openAddLocation(childType, location.id)
-                            }
-                            aria-label="Добавить дочернюю локацию"
-                        >
-                            +
-                        </button>
-                    )}
+                    <div className="location-row-left">
+                        {childType ? (
+                            <button
+                                className={`icon-button ${
+                                    isExpanded ? "icon-rotated" : ""
+                                }`}
+                                type="button"
+                                onClick={() => toggleLocation(location)}
+                                aria-label={
+                                    isExpanded ? "Свернуть" : "Развернуть"
+                                }
+                            >
+                                ▸
+                            </button>
+                        ) : (
+                            <span className="icon-placeholder" />
+                        )}
+                    </div>
+                    <div className="location-row-main">
+                        <div className="location-title">
+                            <span className="location-name">
+                                {location.name}
+                            </span>
+                            <span
+                                className={`location-type-badge type-${location.type}`}
+                            >
+                                {getLocationTypeLabel(location.type)}
+                            </span>
+                        </div>
+                        <div className="location-meta">
+                            {location.type === "building" && location.address && (
+                                <span className="location-address">
+                                    {location.address}
+                                </span>
+                            )}
+                            <span className="location-barcode">
+                                {location.barcode}
+                            </span>
+                        </div>
+                    </div>
+                    <div className="location-row-actions">
+                        {childType && (
+                            <button
+                                className="icon-plus-button"
+                                type="button"
+                                onClick={() =>
+                                    openAddLocation(childType, location.id)
+                                }
+                                aria-label="Добавить дочернюю локацию"
+                            >
+                                +
+                            </button>
+                        )}
+                    </div>
                 </div>
                 {isExpanded && (
                     <div className="location-children">
@@ -1166,84 +1603,107 @@ export default function App() {
                                 <button
                                     className="primary-button"
                                     type="button"
-                                    onClick={() => setIsBookModalOpen(true)}
+                                    onClick={() => {
+                                        setSelectedBook(null)
+                                        setEditingBookId(null)
+                                        setBookDraft(emptyBookDraft)
+                                        setCoverFile(null)
+                                        if (coverPreview) {
+                                            URL.revokeObjectURL(coverPreview)
+                                        }
+                                        setCoverPreview(null)
+                                        setCoverFileName("")
+                                        setWorkSearch("")
+                                        setIsBookModalOpen(true)
+                                    }}
                                 >
                                     Добавить книгу
                                 </button>
                             </div>
                         )}
                     </div>
-                    <SearchBar
-                        onSearch={handleBookSearch}
-                        onReset={() => {
-                            setBooks([])
-                            setBooksQuery("")
-                            setBooksError(null)
-                        }}
-                        isLoading={booksLoading}
-                    />
+                    <label className="field-label">
+                        Поиск книг
+                        <input
+                            className="text-input"
+                            value={booksQuery}
+                            onChange={(event) =>
+                                handleBookQueryChange(event.target.value)
+                            }
+                            placeholder="Название, автор или штрихкод"
+                        />
+                    </label>
+                    <div className="inline-actions">
+                        <button
+                            className="ghost-button"
+                            type="button"
+                            onClick={() => {
+                                setBooksQuery("")
+                                setBooksError(null)
+                            }}
+                            disabled={booksLoading || booksQuery.length === 0}
+                        >
+                            Сброс
+                        </button>
+                    </div>
                     {booksError && <p className="error-banner">{booksError}</p>}
-                    {!booksLoading && books.length === 0 && booksQuery && (
+                    {!booksLoading &&
+                        filteredBooks.length === 0 &&
+                        booksQuery && (
                         <p className="status-line">Нет результатов</p>
                     )}
                     <div className="card-grid">
-                        {books.map((book) => (
-                            <article key={book.id} className="item-card">
+                        {filteredBooks.map((book) => (
+                            <article
+                                key={book.id}
+                                className="item-card"
+                                onClick={() => openBookInfo(book)}
+                                role="button"
+                                tabIndex={0}
+                            >
                                 <div className="item-header">
                                     <SafeImage
                                         src={getCoverUrl(book)}
                                         alt={book.title}
                                         className="cover-image"
                                     />
-                                    <div>
+                                    <div className="book-card-content">
                                         <h3>{book.title}</h3>
-                                        <p className="item-meta">
-                                            {book.publisher?.name ||
-                                                "Без издательства"}
-                                        </p>
-                                    </div>
-                                </div>
-                                <div className="item-body">
-                                    <p>
-                                        <strong>Произведения:</strong>{" "}
-                                            {book.works?.length
-                                                ? book.works
-                                                      .map((work) => work.title)
-                                                      .join(", ")
-                                                : "—"}
-                                    </p>
-                                    <p>
-                                        <strong>Авторы:</strong>{" "}
-                                        {book.works?.length
-                                            ? Array.from(
-                                                  new Set(
-                                                      book.works.flatMap(
-                                                          (work) =>
-                                                              (work.authors ??
-                                                                  []
-                                                              ).map((author) =>
-                                                                  getAuthorName(
-                                                                      author
-                                                                  )
+                                        <div className="book-card-meta">
+                                            <p>
+                                                {book.works?.length
+                                                    ? Array.from(
+                                                          new Set(
+                                                              book.works.flatMap(
+                                                                  (work) =>
+                                                                      (work.authors ??
+                                                                          []
+                                                                      ).map((author) =>
+                                                                          getAuthorName(
+                                                                              author
+                                                                          )
+                                                                      )
                                                               )
-                                                      )
-                                                  )
-                                              ).join(", ")
-                                            : "—"}
-                                    </p>
-                                    {book.year && (
-                                        <p>
-                                            <strong>Год:</strong> {book.year}
-                                        </p>
-                                    )}
-                                    {isAdmin && "location" in book && (
-                                        <p>
-                                            <strong>Локация:</strong>{" "}
-                                            {formatLocation(
-                                                (book as BookInternal).location
+                                                          )
+                                                      ).join(", ")
+                                                    : "—"}
+                                            </p>
+                                            <p className="item-meta">
+                                                {book.publisher?.name ||
+                                                    "Без издательства"}
+                                            </p>
+                                            {book.year && <p>{book.year}</p>}
+                                            {isAdmin && "location" in book && (
+                                                <p>
+                                                    <strong>Локация:</strong>{" "}
+                                                    {formatLocation(
+                                                        (book as BookInternal)
+                                                            .location
+                                                    )}
+                                                </p>
                                             )}
-                                        </p>
-                                    )}
+                                        </div>
+                                    </div>
                                 </div>
                             </article>
                         ))}
@@ -1294,7 +1754,13 @@ export default function App() {
                                                 : ""
                                         }`}
                                     >
-                                        <div className="list-item-content">
+                                        <button
+                                            className="list-item-button"
+                                            type="button"
+                                            onClick={() =>
+                                                handleWorkSelect(work, false)
+                                            }
+                                        >
                                             <span>{work.title}</span>
                                             <span className="item-meta">
                                                 {(() => {
@@ -1307,12 +1773,12 @@ export default function App() {
                                                         : base
                                                 })()}
                                             </span>
-                                        </div>
+                                        </button>
                                         <button
                                             className="icon-button info-button"
                                             type="button"
                                             aria-label="Открыть информацию о произведении"
-                                            onClick={() => handleWorkSelect(work)}
+                                            onClick={() => handleWorkSelect(work, true)}
                                         >
                                             <em>i</em>
                                         </button>
@@ -1391,6 +1857,17 @@ export default function App() {
                                                 : ""
                                         }`}
                                     >
+                                        <SafeImage
+                                            src={
+                                                author.photo_url ||
+                                                getEntityImagePath(
+                                                    "author",
+                                                    author.id
+                                                )
+                                            }
+                                            alt={getAuthorName(author)}
+                                            className="avatar list-avatar"
+                                        />
                                         <button
                                             className="list-item-button"
                                             type="button"
@@ -1496,13 +1973,29 @@ export default function App() {
                             >
                                 <div className="item-header">
                                     <SafeImage
-                                        src={publisher.logo_url}
+                                        src={
+                                            publisher.logo_url ||
+                                            getEntityImagePath(
+                                                "publisher",
+                                                publisher.id
+                                            )
+                                        }
                                         alt={publisher.name}
                                         className="avatar"
                                     />
                                     <div>
                                         <h3>{publisher.name}</h3>
                                     </div>
+                                    <button
+                                        className="icon-button info-button"
+                                        type="button"
+                                        aria-label="Открыть информацию об издательстве"
+                                        onClick={() =>
+                                            handlePublisherInfoOpen(publisher)
+                                        }
+                                    >
+                                        <em>i</em>
+                                    </button>
                                 </div>
                             </article>
                         ))}
@@ -1799,15 +2292,20 @@ export default function App() {
                 </div>
             )}
 
-            {isBookModalOpen && (
+            {isBookModalOpen && isAdmin && (
                 <div className="modal-backdrop">
                     <div className="modal modal-wide">
                         <div className="modal-header">
-                            <h3>Новая книга</h3>
+                            <h3>
+                                {editingBookId ? "Изменить книгу" : "Новая книга"}
+                            </h3>
                             <button
                                 className="icon-button close-button"
                                 type="button"
-                                onClick={() => setIsBookModalOpen(false)}
+                                onClick={() => {
+                                    setIsBookModalOpen(false)
+                                    setEditingBookId(null)
+                                }}
                             >
                                 ✕
                             </button>
@@ -2118,6 +2616,15 @@ export default function App() {
                                             alt="Предпросмотр обложки"
                                         />
                                     )}
+                                    {!coverPreview &&
+                                        editingBookId &&
+                                        selectedBook && (
+                                            <SafeImage
+                                                src={getCoverUrl(selectedBook)}
+                                                alt={selectedBook.title}
+                                                className="cover-preview"
+                                            />
+                                        )}
                                 </div>
                                 <label className="field-label full">
                                     Описание
@@ -2142,15 +2649,6 @@ export default function App() {
                                             className="ghost-button"
                                             type="button"
                                             onClick={() =>
-                                                setIsWorksPickerOpen((prev) => !prev)
-                                            }
-                                        >
-                                            Выбрать
-                                        </button>
-                                        <button
-                                            className="ghost-button"
-                                            type="button"
-                                            onClick={() =>
                                                 setIsWorkModalOpen(true)
                                             }
                                             aria-label="Добавить произведение"
@@ -2159,55 +2657,176 @@ export default function App() {
                                         </button>
                                     </div>
                                 </div>
-                                {isWorksPickerOpen && (
-                                    <div className="checkbox-grid">
-                                        {works.map((work) => (
-                                            <label
-                                                key={work.id}
-                                                className="checkbox-item"
-                                            >
-                                                <input
-                                                    type="checkbox"
-                                                    checked={bookDraft.workIds.includes(
-                                                        work.id
-                                                    )}
-                                                    onChange={(event) => {
-                                                        const checked =
-                                                            event.target.checked
-                                                        setBookDraft((prev) => ({
-                                                            ...prev,
-                                                            workIds: checked
-                                                                ? [
-                                                                      ...prev.workIds,
-                                                                      work.id,
-                                                                  ]
-                                                                : prev.workIds.filter(
-                                                                      (id) =>
-                                                                          id !==
-                                                                          work.id
-                                                                  ),
-                                                        }))
-                                                    }}
-                                                />
-                                                <span>
-                                                    {work.title}
-                                                    <small className="item-meta">
-                                                    {(() => {
-                                                        const names = (work.authors ?? [])
-                                                            .map(getAuthorName)
-                                                            .join(", ")
-                                                        const base =
-                                                            names || "Без автора"
-                                                        return work.year
-                                                            ? `${base}, ${work.year}`
-                                                            : base
-                                                    })()}
-                                                </small>
-                                            </span>
-                                        </label>
-                                    ))}
+                                <div className="work-picker">
+                                    <label className="field-label">
+                                        Поиск
+                                        <input
+                                            className="text-input"
+                                            placeholder="Начните вводить название"
+                                            value={workSearch}
+                                            onChange={(event) =>
+                                                setWorkSearch(event.target.value)
+                                            }
+                                        />
+                                    </label>
+                                    <div className="work-picker-columns">
+                                        <div className="work-picker-panel">
+                                            <h5>Найденные произведения</h5>
+                                            <div className="stack">
+                                                {works
+                                                    .filter((work) => {
+                                                        if (
+                                                            bookDraft.workIds.includes(
+                                                                work.id
+                                                            )
+                                                        ) {
+                                                            return false
+                                                        }
+                                                        const query =
+                                                            workSearch.trim().toLowerCase()
+                                                        if (!query) {
+                                                            return true
+                                                        }
+                                                        return work.title
+                                                            .toLowerCase()
+                                                            .includes(query)
+                                                    })
+                                                    .map((work) => (
+                                                        <div
+                                                            key={work.id}
+                                                            className="work-picker-row"
+                                                        >
+                                                            <div>
+                                                                <div className="work-title">
+                                                                    {work.title}
+                                                                </div>
+                                                                <small className="item-meta">
+                                                                    {(() => {
+                                                                        const names = (
+                                                                            work.authors ??
+                                                                            []
+                                                                        )
+                                                                            .map(getAuthorName)
+                                                                            .join(", ")
+                                                                        const base =
+                                                                            names ||
+                                                                            "Без автора"
+                                                                        return work.year
+                                                                            ? `${base}, ${work.year}`
+                                                                            : base
+                                                                    })()}
+                                                                </small>
+                                                            </div>
+                                                            <button
+                                                                className="ghost-button"
+                                                                type="button"
+                                                                onClick={() =>
+                                                                    setBookDraft(
+                                                                        (prev) => ({
+                                                                            ...prev,
+                                                                            workIds: [
+                                                                                ...prev.workIds,
+                                                                                work.id,
+                                                                            ],
+                                                                        })
+                                                                    )
+                                                                }
+                                                            >
+                                                                Добавить
+                                                            </button>
+                                                        </div>
+                                                    ))}
+                                                {works.filter((work) => {
+                                                    if (
+                                                        bookDraft.workIds.includes(
+                                                            work.id
+                                                        )
+                                                    ) {
+                                                        return false
+                                                    }
+                                                    const query =
+                                                        workSearch.trim().toLowerCase()
+                                                    if (!query) {
+                                                        return true
+                                                    }
+                                                    return work.title
+                                                        .toLowerCase()
+                                                        .includes(query)
+                                                }).length === 0 && (
+                                                    <p className="status-line">
+                                                        Ничего не найдено
+                                                    </p>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <div className="work-picker-panel">
+                                            <h5>Выбранные произведения</h5>
+                                            <div className="stack">
+                                                {bookDraft.workIds.length === 0 && (
+                                                    <p className="status-line">
+                                                        Пока нет выбранных
+                                                    </p>
+                                                )}
+                                                {bookDraft.workIds.map((workId) => {
+                                                    const work = works.find(
+                                                        (item) =>
+                                                            item.id === workId
+                                                    )
+                                                    if (!work) {
+                                                        return null
+                                                    }
+                                                    return (
+                                                        <div
+                                                            key={work.id}
+                                                            className="work-picker-row"
+                                                        >
+                                                            <div>
+                                                                <div className="work-title">
+                                                                    {work.title}
+                                                                </div>
+                                                                <small className="item-meta">
+                                                                    {(() => {
+                                                                        const names = (
+                                                                            work.authors ??
+                                                                            []
+                                                                        )
+                                                                            .map(getAuthorName)
+                                                                            .join(", ")
+                                                                        const base =
+                                                                            names ||
+                                                                            "Без автора"
+                                                                        return work.year
+                                                                            ? `${base}, ${work.year}`
+                                                                            : base
+                                                                    })()}
+                                                                </small>
+                                                            </div>
+                                                            <button
+                                                                className="ghost-button"
+                                                                type="button"
+                                                                onClick={() =>
+                                                                    setBookDraft(
+                                                                        (prev) => ({
+                                                                            ...prev,
+                                                                            workIds:
+                                                                                prev.workIds.filter(
+                                                                                    (id) =>
+                                                                                        id !==
+                                                                                        work.id
+                                                                                ),
+                                                                        })
+                                                                    )
+                                                                }
+                                                            >
+                                                                Убрать
+                                                            </button>
+                                                        </div>
+                                                    )
+                                                })}
+                                            </div>
+                                        </div>
                                     </div>
-                                )}
+                                </div>
                             </div>
                             {bookError && (
                                 <p className="error-banner">{bookError}</p>
@@ -2220,9 +2839,151 @@ export default function App() {
                                 onClick={handleCreateBook}
                                 disabled={bookSaving}
                             >
-                                {bookSaving ? "Сохранение..." : "Добавить книгу"}
+                                {bookSaving
+                                    ? "Сохранение..."
+                                    : editingBookId
+                                    ? "Сохранить"
+                                    : "Добавить книгу"}
                             </button>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {isBookInfoOpen && selectedBook && (
+                <div className="modal-backdrop">
+                    <div className="modal modal-wide book-info-modal">
+                        <div className="modal-header">
+                            <div className="book-info-header">
+                                <SafeImage
+                                    src={getCoverUrl(selectedBook)}
+                                    alt={selectedBook.title}
+                                    className="cover-preview book-info-cover"
+                                />
+                                <div className="book-info-header-text">
+                                    <h3>{selectedBook.title}</h3>
+                                    <div className="book-info-header-meta">
+                                        <p>
+                                            {selectedBook.works?.length
+                                                ? Array.from(
+                                                      new Set(
+                                                          selectedBook.works.flatMap(
+                                                              (work) =>
+                                                                  (work.authors ??
+                                                                      []
+                                                                  ).map((author) =>
+                                                                      getAuthorName(
+                                                                          author
+                                                                      )
+                                                                  )
+                                                          )
+                                                      )
+                                                  ).join(", ")
+                                                : "—"}
+                                        </p>
+                                        {selectedBook.publisher?.name && (
+                                            <p className="item-meta">
+                                                {selectedBook.publisher.name}
+                                            </p>
+                                        )}
+                                        {selectedBook.year && (
+                                            <p className="item-meta">
+                                                {selectedBook.year}
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                            <button
+                                className="icon-button close-button"
+                                type="button"
+                                onClick={() => setIsBookInfoOpen(false)}
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <div className="modal-body">
+                            <div className="stack book-info-stack">
+                                <div className="book-info-meta">
+                                    <p className="item-meta">
+                                        Локация:{" "}
+                                        {"location" in selectedBook
+                                            ? formatLocation(
+                                                  (selectedBook as BookInternal)
+                                                      .location
+                                              )
+                                            : "—"}
+                                    </p>
+                                </div>
+                                {selectedBook.description && (
+                                    <p>{selectedBook.description}</p>
+                                )}
+                                <div className="stack">
+                                    <h4 className="subheading">Произведения</h4>
+                                    {(selectedBook.works ?? []).length === 0 && (
+                                        <p className="status-line">Нет данных</p>
+                                    )}
+                                    <div className="stack">
+                                        {(selectedBook.works ?? []).map((work) => (
+                                            <button
+                                                key={work.id}
+                                                className="mini-card list-item-selectable"
+                                                type="button"
+                                                onClick={async () => {
+                                                    setActiveTab("works")
+                                                    await handleWorkSelect(
+                                                        work,
+                                                        false
+                                                    )
+                                                    setIsBookInfoOpen(false)
+                                                }}
+                                            >
+                                                <span>{work.title}</span>
+                                                <span className="item-meta">
+                                                    {(() => {
+                                                        const names = (
+                                                            work.authors ?? []
+                                                        )
+                                                            .map(getAuthorName)
+                                                            .join(", ")
+                                                        return names || "Без автора"
+                                                    })()}
+                                                </span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="book-info-timestamps">
+                                    {(selectedBook as BookPublic).created_at && (
+                                        <p className="item-meta">
+                                            Создано:{" "}
+                                            {formatDateTime(
+                                                (selectedBook as BookPublic).created_at
+                                            )}
+                                        </p>
+                                    )}
+                                    {(selectedBook as BookPublic).updated_at && (
+                                        <p className="item-meta">
+                                            Обновлено:{" "}
+                                            {formatDateTime(
+                                                (selectedBook as BookPublic).updated_at
+                                            )}
+                                        </p>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                        {isAdmin && (
+                            <div className="modal-footer">
+                                <button
+                                    className="ghost-button"
+                                    type="button"
+                                    onClick={() => openBookEdit(selectedBook)}
+                                >
+                                    Изменить
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
@@ -2631,6 +3392,356 @@ export default function App() {
                 </div>
             )}
 
+            {isPublisherInfoOpen && (
+                <div className="modal-backdrop">
+                    <div className="modal">
+                        <div className="modal-header">
+                            <div>
+                                <h3>
+                                    {selectedPublisher
+                                        ? selectedPublisher.name
+                                        : "Загрузка..."}
+                                </h3>
+                            </div>
+                            <button
+                                className="icon-button close-button"
+                                type="button"
+                                onClick={() => setIsPublisherInfoOpen(false)}
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <div className="modal-body">
+                            {selectedPublisher ? (
+                                <div className="stack">
+                                    {selectedPublisher.logo_url && (
+                                        <SafeImage
+                                            src={selectedPublisher.logo_url}
+                                            alt={selectedPublisher.name}
+                                            className="publisher-logo-full"
+                                        />
+                                    )}
+                                    <div className="stack author-info-stack">
+                                        {selectedPublisher.web_url && (
+                                            <p>
+                                                <strong>Сайт:</strong>{" "}
+                                                {selectedPublisher.web_url}
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
+                            ) : (
+                                <p className="status-line">Загрузка...</p>
+                            )}
+                        </div>
+                        {isAdmin && (
+                            <div className="modal-footer modal-footer-actions">
+                                {publisherInfoError && (
+                                    <p className="error-banner">
+                                        {publisherInfoError}
+                                    </p>
+                                )}
+                                <button
+                                    className="ghost-button"
+                                    type="button"
+                                    onClick={() =>
+                                        selectedPublisher &&
+                                        openPublisherEdit(selectedPublisher)
+                                    }
+                                    disabled={!selectedPublisher || publisherInfoSaving}
+                                >
+                                    Изменить
+                                </button>
+                                <button
+                                    className="primary-button"
+                                    type="button"
+                                    onClick={handlePublisherDelete}
+                                    disabled={!selectedPublisher || publisherInfoSaving}
+                                >
+                                    Удалить
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {isPublisherEditOpen && isAdmin && (
+                <div className="modal-backdrop">
+                    <div className="modal">
+                        <div className="modal-header">
+                            <h3>Изменить издательство</h3>
+                            <button
+                                className="icon-button close-button"
+                                type="button"
+                                onClick={() => setIsPublisherEditOpen(false)}
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <div className="modal-body">
+                            {selectedPublisher?.logo_url && (
+                                <SafeImage
+                                    src={selectedPublisher.logo_url}
+                                    alt={selectedPublisher.name}
+                                    className="publisher-logo-full"
+                                />
+                            )}
+                            <label className="field-label">
+                                Название
+                                <input
+                                    className="text-input"
+                                    value={publisherEditDraft.name}
+                                    onChange={(event) =>
+                                        setPublisherEditDraft((prev) => ({
+                                            ...prev,
+                                            name: event.target.value,
+                                        }))
+                                    }
+                                />
+                            </label>
+                            <label className="field-label">
+                                Сайт
+                                <input
+                                    className="text-input"
+                                    value={publisherEditDraft.webUrl}
+                                    onChange={(event) =>
+                                        setPublisherEditDraft((prev) => ({
+                                            ...prev,
+                                            webUrl: event.target.value,
+                                        }))
+                                    }
+                                />
+                            </label>
+                            <div className="field-label">
+                                <span>Логотип</span>
+                                <div className="file-input">
+                                    <input
+                                        id="publisher-logo-edit"
+                                        type="file"
+                                        accept="image/*"
+                                        onChange={(event) => {
+                                            const file =
+                                                event.target.files?.[0] ?? null
+                                            if (publisherEditLogoPreview) {
+                                                URL.revokeObjectURL(
+                                                    publisherEditLogoPreview
+                                                )
+                                            }
+                                            if (!file) {
+                                                setPublisherEditLogoFile(null)
+                                                setPublisherEditLogoPreview(null)
+                                                return
+                                            }
+                                            const url = URL.createObjectURL(file)
+                                            setPublisherEditLogoFile(file)
+                                            setPublisherEditLogoPreview(url)
+                                        }}
+                                    />
+                                    <label
+                                        className="ghost-button file-button"
+                                        htmlFor="publisher-logo-edit"
+                                    >
+                                        Выбрать
+                                    </label>
+                                    <span className="item-meta file-name">
+                                        {publisherEditLogoFile?.name ||
+                                            "Файл не выбран"}
+                                    </span>
+                                </div>
+                                {publisherEditLogoPreview && (
+                                    <img
+                                        className="avatar"
+                                        src={publisherEditLogoPreview}
+                                        alt="Предпросмотр логотипа"
+                                    />
+                                )}
+                            </div>
+                            {publisherEditError && (
+                                <p className="error-banner">{publisherEditError}</p>
+                            )}
+                        </div>
+                        <div className="modal-footer">
+                            <button
+                                className="primary-button"
+                                type="button"
+                                onClick={handlePublisherEditSave}
+                                disabled={publisherEditSaving}
+                            >
+                                {publisherEditSaving
+                                    ? "Сохранение..."
+                                    : "Сохранить"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isAuthorEditOpen && isAdmin && (
+                <div className="modal-backdrop modal-backdrop-top">
+                    <div className="modal">
+                        <div className="modal-header">
+                            <h3>Изменить автора</h3>
+                            <button
+                                className="icon-button close-button"
+                                type="button"
+                                onClick={() => setIsAuthorEditOpen(false)}
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <div className="modal-body">
+                            {selectedAuthor?.photo_url && (
+                                <SafeImage
+                                    src={selectedAuthor.photo_url}
+                                    alt={getAuthorName(selectedAuthor)}
+                                    className="avatar"
+                                />
+                            )}
+                            <label className="field-label">
+                                Фамилия
+                                <input
+                                    className="text-input"
+                                    value={authorEditDraft.lastName}
+                                    onChange={(event) =>
+                                        setAuthorEditDraft((prev) => ({
+                                            ...prev,
+                                            lastName: event.target.value,
+                                        }))
+                                    }
+                                />
+                            </label>
+                            <label className="field-label">
+                                Имя
+                                <input
+                                    className="text-input"
+                                    value={authorEditDraft.firstName}
+                                    onChange={(event) =>
+                                        setAuthorEditDraft((prev) => ({
+                                            ...prev,
+                                            firstName: event.target.value,
+                                        }))
+                                    }
+                                />
+                            </label>
+                            <label className="field-label">
+                                Отчество
+                                <input
+                                    className="text-input"
+                                    value={authorEditDraft.middleName}
+                                    onChange={(event) =>
+                                        setAuthorEditDraft((prev) => ({
+                                            ...prev,
+                                            middleName: event.target.value,
+                                        }))
+                                    }
+                                />
+                            </label>
+                            <label className="field-label">
+                                Дата рождения
+                                <input
+                                    className="text-input"
+                                    type="date"
+                                    value={authorEditDraft.birthDate}
+                                    onChange={(event) =>
+                                        setAuthorEditDraft((prev) => ({
+                                            ...prev,
+                                            birthDate: event.target.value,
+                                        }))
+                                    }
+                                />
+                            </label>
+                            <label className="field-label">
+                                Дата смерти
+                                <input
+                                    className="text-input"
+                                    type="date"
+                                    value={authorEditDraft.deathDate}
+                                    onChange={(event) =>
+                                        setAuthorEditDraft((prev) => ({
+                                            ...prev,
+                                            deathDate: event.target.value,
+                                        }))
+                                    }
+                                />
+                            </label>
+                            <div className="field-label">
+                                <span>Фото</span>
+                                <div className="file-input">
+                                    <input
+                                        id="author-photo-edit"
+                                        type="file"
+                                        accept="image/*"
+                                        onChange={(event) => {
+                                            const file =
+                                                event.target.files?.[0] ?? null
+                                            if (authorEditPhotoPreview) {
+                                                URL.revokeObjectURL(
+                                                    authorEditPhotoPreview
+                                                )
+                                            }
+                                            if (!file) {
+                                                setAuthorEditPhotoFile(null)
+                                                setAuthorEditPhotoPreview(null)
+                                                return
+                                            }
+                                            const url = URL.createObjectURL(file)
+                                            setAuthorEditPhotoFile(file)
+                                            setAuthorEditPhotoPreview(url)
+                                        }}
+                                    />
+                                    <label
+                                        className="ghost-button file-button"
+                                        htmlFor="author-photo-edit"
+                                    >
+                                        Выбрать
+                                    </label>
+                                    <span className="item-meta file-name">
+                                        {authorEditPhotoFile?.name ||
+                                            "Файл не выбран"}
+                                    </span>
+                                </div>
+                                {authorEditPhotoPreview && (
+                                    <img
+                                        className="avatar"
+                                        src={authorEditPhotoPreview}
+                                        alt="Предпросмотр фото автора"
+                                    />
+                                )}
+                            </div>
+                            <label className="field-label full">
+                                Биография
+                                <textarea
+                                    className="text-area"
+                                    value={authorEditDraft.bio}
+                                    onChange={(event) =>
+                                        setAuthorEditDraft((prev) => ({
+                                            ...prev,
+                                            bio: event.target.value,
+                                        }))
+                                    }
+                                />
+                            </label>
+                            {authorEditError && (
+                                <p className="error-banner">{authorEditError}</p>
+                            )}
+                        </div>
+                        <div className="modal-footer">
+                            <button
+                                className="primary-button"
+                                type="button"
+                                onClick={handleAuthorEditSave}
+                                disabled={authorEditSaving}
+                            >
+                                {authorEditSaving
+                                    ? "Сохранение..."
+                                    : "Сохранить"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {isLocationModalOpen && (
                 <div className="modal-backdrop">
                     <div className="modal">
@@ -2809,28 +3920,18 @@ export default function App() {
                                         <SafeImage
                                             src={selectedAuthor.photo_url}
                                             alt={getAuthorName(selectedAuthor)}
-                                            className="avatar"
+                                            className="publisher-logo-full"
                                         />
                                     )}
                                     <div>
                                         <div className="stack author-info-stack">
-                                            {selectedAuthor.middle_name && (
-                                                <p>
-                                                    <strong>Отчество:</strong>{" "}
-                                                    {selectedAuthor.middle_name}
-                                                </p>
-                                            )}
                                             {selectedAuthor.bio && (
-                                                <p>
-                                                    <strong>Биография:</strong>{" "}
-                                                    {selectedAuthor.bio}
-                                                </p>
-                                            )}
-                                            {selectedAuthor.photo_url && (
-                                                <p>
-                                                    <strong>Фото:</strong>{" "}
-                                                    {selectedAuthor.photo_url}
-                                                </p>
+                                                <div className="author-bio-scroll">
+                                                    <p>
+                                                        <strong>Биография:</strong>{" "}
+                                                        {selectedAuthor.bio}
+                                                    </p>
+                                                </div>
                                             )}
                                         </div>
                                     </div>
@@ -2839,6 +3940,26 @@ export default function App() {
                                 <p className="status-line">Загрузка...</p>
                             )}
                         </div>
+                        {isAdmin && (
+                            <div className="modal-footer modal-footer-actions">
+                                {authorInfoError && (
+                                    <p className="error-banner">
+                                        {authorInfoError}
+                                    </p>
+                                )}
+                                <button
+                                    className="ghost-button"
+                                    type="button"
+                                    onClick={() =>
+                                        selectedAuthor &&
+                                        openAuthorEdit(selectedAuthor)
+                                    }
+                                    disabled={!selectedAuthor || authorInfoSaving}
+                                >
+                                    Изменить
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}

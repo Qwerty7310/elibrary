@@ -23,6 +23,12 @@ export function updatePublisher(id: string, payload: {
     })
 }
 
+export function deletePublisher(id: string) {
+    return requestJson<void>(`/admin/publishers/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+    })
+}
+
 export function getPublisherByID(id: string) {
     return requestJson<Publisher>(`/publishers/${encodeURIComponent(id)}`)
 }

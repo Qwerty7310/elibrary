@@ -27,15 +27,13 @@ func NewImageStorage(basePath string, baseURL string) *ImageStorage {
 }
 
 func (s *ImageStorage) Save(ctx context.Context, entity storage.EntityType, entityID uuid.UUID, file io.Reader) (string, error) {
-	id := uuid.New().String()
-
 	dir := filepath.Join(s.basePath, string(entity), entityID.String())
 
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", err
 	}
 
-	filename := id + ".jpg"
+	filename := "photo.jpg"
 	fullPath := filepath.Join(dir, filename)
 
 	out, err := os.Create(fullPath)

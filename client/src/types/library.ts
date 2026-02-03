@@ -20,6 +20,7 @@ export type AuthorSummary = {
     last_name: string
     first_name?: string
     middle_name?: string
+    photo_url?: string
 }
 
 export type Author = AuthorSummary & {
