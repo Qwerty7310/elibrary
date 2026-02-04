@@ -84,7 +84,7 @@ services:
       - "8080"
 
     volumes:
-      - ./data/images:/app/data/images
+      - /home/root/elibrary-data/images:/app/data/images
 
     networks:
       - elibrary

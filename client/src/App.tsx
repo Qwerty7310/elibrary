@@ -20,6 +20,7 @@ import {
     getLocationChildren,
     getLocationsByType,
 } from "./api/locations"
+import {sendPrintTask} from "./api/print"
 import {
     getAuthorsReference,
     getPublishersReference,
@@ -190,6 +191,35 @@ function formatLocationShort(location?: BookInternal["location"]) {
     return `${name}${address}`
 }
 
+function getBookAuthorsLine(book: BookPublic) {
+    if (!book.works?.length) {
+        return ""
+    }
+    return Array.from(
+        new Set(
+            book.works.flatMap((work) =>
+                (work.authors ?? []).map((author) => getAuthorName(author))
+            )
+        )
+    ).join(", ")
+}
+
+function getLocationPrintLine(location: LocationEntity) {
+    const typeLabel = getLocationTypeLabel(location.type)
+    if (location.type === "building" && location.address) {
+        return `${typeLabel}: ${location.address}`
+    }
+    return typeLabel
+}
+
+function getLocationTypeLabel(type: string) {
+    if (type === "building") return "Здание"
+    if (type === "room") return "Комната"
+    if (type === "cabinet") return "Шкаф"
+    if (type === "shelf") return "Полка"
+    return "Локация"
+}
+
 function formatDate(value?: string) {
     if (!value) {
         return ""
@@ -204,7 +234,7 @@ function formatDate(value?: string) {
     return `${day}.${month}.${year}`
 }
 
-function formatDateTime(value?: string) {
+    function formatDateTime(value?: string) {
     if (!value) {
         return ""
     }
@@ -219,14 +249,15 @@ function formatDateTime(value?: string) {
         hour: "2-digit",
         minute: "2-digit",
     })
-}
+    }
 
-function formatLifeDates(author: Author) {
+    function formatLifeDates(author: Author) {
     const birth = formatDate(author.birth_date)
     const death = formatDate(author.death_date)
     if (!birth && !death) {
         return ""
     }
+
     return `${birth || "—"} - ${death || "—"}`
 }
 
@@ -315,6 +346,7 @@ export default function App() {
     const [books, setBooks] = useState<BookPublic[]>([])
     const [booksError, setBooksError] = useState<string | null>(null)
     const [booksLoading, setBooksLoading] = useState(false)
+    const [printError, setPrintError] = useState<string | null>(null)
     const [selectedBook, setSelectedBook] = useState<BookPublic | null>(null)
     const [isBookInfoOpen, setIsBookInfoOpen] = useState(false)
     const [editingBookId, setEditingBookId] = useState<string | null>(null)
@@ -1312,6 +1344,27 @@ export default function App() {
         }
     }
 
+    async function handlePrintTask(payload: {
+        str1: string
+        str2: string
+        barcode: string
+    }) {
+        if (!payload.barcode.trim()) {
+            setPrintError("Штрихкод отсутствует")
+            return
+        }
+        try {
+            setPrintError(null)
+            await sendPrintTask(payload)
+        } catch (err) {
+            if (err instanceof ApiError) {
+                setPrintError(err.message)
+            } else {
+                setPrintError("Не удалось отправить на печать")
+            }
+        }
+    }
+
     async function toggleLocation(location: LocationEntity) {
         const id = location.id
         const isExpanded = expandedLocations.has(id)
@@ -1407,14 +1460,6 @@ export default function App() {
         setIsLocationModalOpen(true)
     }
 
-    function getLocationTypeLabel(type: string) {
-        if (type === "building") return "Здание"
-        if (type === "room") return "Комната"
-        if (type === "cabinet") return "Шкаф"
-        if (type === "shelf") return "Полка"
-        return "Локация"
-    }
-
     function renderLocationNode(location: LocationEntity, level = 0) {
         const childType = getChildType(location.type)
         const isExpanded = expandedLocations.has(location.id)
@@ -1475,6 +1520,21 @@ export default function App() {
                                 aria-label="Добавить дочернюю локацию"
                             >
                                 +
+                            </button>
+                        )}
+                        {isAdmin && (
+                            <button
+                                className="ghost-button"
+                                type="button"
+                                onClick={() =>
+                                    handlePrintTask({
+                                        str1: location.name,
+                                        str2: getLocationPrintLine(location),
+                                        barcode: location.barcode,
+                                    })
+                                }
+                            >
+                                Печать
                             </button>
                         )}
                     </div>
@@ -1647,6 +1707,7 @@ export default function App() {
                         </button>
                     </div>
                     {booksError && <p className="error-banner">{booksError}</p>}
+                    {printError && <p className="error-banner">{printError}</p>}
                     {!booksLoading &&
                         filteredBooks.length === 0 &&
                         booksQuery && (
@@ -1701,6 +1762,24 @@ export default function App() {
                                                             .location
                                                     )}
                                                 </p>
+                                            )}
+                                            {isAdmin && (
+                                                <button
+                                                    className="ghost-button"
+                                                    type="button"
+                                                    onClick={(event) => {
+                                                        event.stopPropagation()
+                                                        handlePrintTask({
+                                                            str1: getBookAuthorsLine(
+                                                                book
+                                                            ),
+                                                            str2: book.title,
+                                                            barcode: book.barcode,
+                                                        })
+                                                    }}
+                                                >
+                                                    Печать штрихкода
+                                                </button>
                                             )}
                                         </div>
                                     </div>
@@ -2022,8 +2101,10 @@ export default function App() {
                             </button>
                         )}
                     </div>
-                    {locationsError ? (
-                        <p className="error-banner">{locationsError}</p>
+                    {locationsError || printError ? (
+                        <p className="error-banner">
+                            {locationsError ?? printError}
+                        </p>
                     ) : (
                         <div className="location-tree">
                             {!locationsLoaded && (
