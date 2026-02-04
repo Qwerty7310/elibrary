@@ -26,7 +26,7 @@ import {
     getPublishersReference,
     getWorksReference,
 } from "./api/reference"
-import {ApiError, setToken} from "./api/http"
+import {API_URL, ApiError, setToken} from "./api/http"
 import {getUserByID, updateUser} from "./api/users"
 import {SafeImage} from "./components/SafeImage"
 import {uploadImage} from "./api/images"
@@ -262,7 +262,7 @@ function formatDate(value?: string) {
 }
 
 function getEntityImagePath(entity: "author" | "publisher" | "book", id: string) {
-    return `/static/images/${entity}/${id}/photo.jpg`
+    return `${API_URL}/static/images/${entity}/${id}/photo.jpg`
 }
 
 function withCacheBust(url: string) {
