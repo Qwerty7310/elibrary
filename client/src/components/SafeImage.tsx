@@ -197,8 +197,8 @@ function resolveImageSrc(src: string) {
     if (!src.startsWith("/static/")) {
         return src
     }
-    const apiBase = API_URL.replace(/\/elibrary\/api\/?$/, "")
-    if (!apiBase || apiBase === "/") {
+    const apiBase = API_URL.replace(/\/$/, "")
+    if (!apiBase) {
         return src
     }
     return `${apiBase}${src}`
