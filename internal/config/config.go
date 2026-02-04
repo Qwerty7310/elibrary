@@ -15,6 +15,9 @@ type Config struct {
 
 	ImagesPath string
 	ImagesURL  string
+
+	RabbitURL   string
+	RabbitQueue string
 }
 
 func Load() *Config {
@@ -30,6 +33,9 @@ func Load() *Config {
 
 		ImagesPath: getEnv("IMAGES_PATH", "./data/images"),
 		ImagesURL:  getEnv("IMAGES_URL", "/static/images"),
+
+		RabbitURL:   getEnv("RABBIT_URL", "amqp://printer_user:strong_pass@rabbitmq:5672/"),
+		RabbitQueue: getEnv("RABBIT_QUEUE", "print_queue"),
 	}
 
 	log.Println("config loaded:", cfg.HTTPAddr)

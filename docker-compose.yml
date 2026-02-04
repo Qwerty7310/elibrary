@@ -1,4 +1,20 @@
 services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: elibrary-rabbitmq
+    restart: unless-stopped
+
+    environment:
+      RABBITMQ_DEFAULT_USER: printer_user
+      RABBITMQ_DEFAULT_PASS: strong_pass
+
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+    networks:
+      - elibrary
+
   postgres:
     image: postgres:15
     container_name: elibrary-postgres
@@ -51,11 +67,15 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+      rabbitmq:
+        condition: service_started
 
     environment:
       DB_URL: postgres://elibrary:elibrary@postgres:5432/elibrary?sslmode=disable
       HTTP_ADDR: :8080
       IMAGES_PATH: /app/data/images
+      RABBIT_URL: amqp://printer_user:strong_pass@rabbitmq:5672/
+      RABBIT_QUEUE: print_queue
 
     ports:
       - "8080:8080"

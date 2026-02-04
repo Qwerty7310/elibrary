@@ -80,6 +80,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	locationService := service.NewLocationService(locationRepo, barcodeService)
 	userService := service.NewUserService(userRepo)
 	imageService := service.NewImageService(imageStorage)
+	printQueue := service.NewPrintQueue(cfg.RabbitURL, cfg.RabbitQueue)
 
 	// ---------- Handlers ----------
 	authHandler := handler.NewAuthHandler(authService)
@@ -93,6 +94,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	locationHandler := handler.NewLocationHandler(locationService)
 	userHandler := handler.NewUserHandler(userService)
 	imageHandler := handler.NewImageHandler(imageService)
+	printHandler := handler.NewPrintHandler(printQueue)
 
 	// ---------- Public routes ----------
 	r.Get("/health", handler.Health)
@@ -143,6 +145,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 			r.Use(httpMiddleware.RequireRole(auth.RoleAdmin))
 
 			r.Post("/{entity}/{id}/image", imageHandler.Upload)
+			r.Post("/print", printHandler.Send)
 
 			r.Route("/users", func(r chi.Router) {
 				r.Get("/{id}", userHandler.GetByID)
