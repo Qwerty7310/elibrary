@@ -307,6 +307,10 @@ function getBookSearchText(book: BookPublic) {
     return parts.join(" ").toLowerCase()
 }
 
+function isBookInternal(book: BookPublic | BookInternal): book is BookInternal {
+    return "location" in book
+}
+
 export default function App() {
     const [activeTab, setActiveTab] = useState<TabKey>("books")
     const [token, setAuthToken] = useState<string | null>(
@@ -431,7 +435,7 @@ export default function App() {
     const [authorPhotoPreview, setAuthorPhotoPreview] = useState<string | null>(
         null
     )
-    const [authorInfoSaving, setAuthorInfoSaving] = useState(false)
+    const [authorInfoSaving] = useState(false)
     const [authorInfoError, setAuthorInfoError] = useState<string | null>(null)
     const [isAuthorEditOpen, setIsAuthorEditOpen] = useState(false)
     const [authorEditDraft, setAuthorEditDraft] = useState({
@@ -860,8 +864,8 @@ export default function App() {
             return
         }
         let details: BookInternal | BookPublic = book
-        let location =
-            "location" in book && book.location ? book.location : undefined
+        let location: BookInternal["location"] | undefined =
+            isBookInternal(book) && book.location ? book.location : undefined
         if (!location && token) {
             try {
                 const internalBooks = await searchBooksInternal("")
