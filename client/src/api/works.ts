@@ -15,3 +15,27 @@ export function createWork(payload: {
     })
 }
 
+export function updateWork(
+    id: string,
+    payload: {
+        title?: string
+        description?: string
+        year?: number
+        authors?: string[]
+    }
+) {
+    return requestJson<void>(`/admin/works/${encodeURIComponent(id)}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+    })
+}
+
+export function getWorkByID(id: string) {
+    return requestJson<WorkDetailed>(`/works/${encodeURIComponent(id)}`)
+}
+
+export function deleteWork(id: string) {
+    return requestJson<void>(`/admin/works/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+    })
+}

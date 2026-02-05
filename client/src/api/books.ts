@@ -10,26 +10,53 @@ type BookListResponse<T> = {
     count: number
 }
 
-export async function searchBooksPublic(query: string): Promise<BookPublic[]> {
-    const params = new URLSearchParams()
-    if (query.trim()) {
-        params.set("q", query.trim())
+const BOOKS_PAGE_LIMIT = 200
+
+async function fetchAllPages<T>(
+    fetchPage: (limit: number, offset: number) => Promise<BookListResponse<T>>
+): Promise<T[]> {
+    const all: T[] = []
+    let offset = 0
+    while (true) {
+        const data = await fetchPage(BOOKS_PAGE_LIMIT, offset)
+        const items = data.items ?? []
+        all.push(...items)
+        if (items.length < BOOKS_PAGE_LIMIT) {
+            break
+        }
+        offset += items.length
     }
-    const data = await requestJson<BookListResponse<BookPublic>>(
-        `/books/public?${params.toString()}`
-    )
-    return data.items ?? []
+    return all
+}
+
+export async function searchBooksPublic(query: string): Promise<BookPublic[]> {
+    const trimmed = query.trim()
+    return fetchAllPages((limit, offset) => {
+        const params = new URLSearchParams()
+        if (trimmed) {
+            params.set("q", trimmed)
+        }
+        params.set("limit", String(limit))
+        params.set("offset", String(offset))
+        return requestJson<BookListResponse<BookPublic>>(
+            `/books/public?${params.toString()}`
+        )
+    })
 }
 
 export async function searchBooksInternal(query: string): Promise<BookInternal[]> {
-    const params = new URLSearchParams()
-    if (query.trim()) {
-        params.set("q", query.trim())
-    }
-    const data = await requestJson<BookListResponse<BookInternal>>(
-        `/books/internal?${params.toString()}`
-    )
-    return data.items ?? []
+    const trimmed = query.trim()
+    return fetchAllPages((limit, offset) => {
+        const params = new URLSearchParams()
+        if (trimmed) {
+            params.set("q", trimmed)
+        }
+        params.set("limit", String(limit))
+        params.set("offset", String(offset))
+        return requestJson<BookListResponse<BookInternal>>(
+            `/books/internal?${params.toString()}`
+        )
+    })
 }
 
 export async function createBook(payload: {

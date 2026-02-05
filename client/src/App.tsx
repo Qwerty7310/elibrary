@@ -1,4 +1,4 @@
-import {useEffect, useMemo, useState} from "react"
+import {useEffect, useMemo, useRef, useState} from "react"
 import "./App.css"
 import {loginUser} from "./api/auth"
 import {
@@ -14,7 +14,7 @@ import {
     getPublisherByID,
     updatePublisher,
 } from "./api/publishers"
-import {createWork} from "./api/works"
+import {createWork, deleteWork, getWorkByID, updateWork} from "./api/works"
 import {
     createLocation,
     getLocationChildren,
@@ -39,6 +39,7 @@ import type {
     LocationEntity,
     Publisher,
     User,
+    WorkDetailed,
     WorkShort,
 } from "./types/library"
 
@@ -91,6 +92,13 @@ type LocationDraft = {
     description: string
     lockParent: boolean
     lockType: boolean
+}
+
+type PrintQueueItem = {
+    id: string
+    title: string
+    authors: string
+    barcode: string
 }
 
 const emptyBookDraft: BookDraft = {
@@ -270,6 +278,14 @@ function withCacheBust(url: string) {
     return url.includes("?") ? `${url}&v=${stamp}` : `${url}?v=${stamp}`
 }
 
+function truncateLabel(value: string, max = 32) {
+    const trimmed = value.trim()
+    if (trimmed.length <= max) {
+        return trimmed
+    }
+    return `${trimmed.slice(0, Math.max(0, max - 1))}…`
+}
+
 function getCoverUrl(book: BookPublic) {
     const extra = book.extra ?? {}
     const cover = extra.cover_url
@@ -277,34 +293,6 @@ function getCoverUrl(book: BookPublic) {
         return cover
     }
     return getEntityImagePath("book", book.id)
-}
-
-function getBookSearchText(book: BookPublic) {
-    const parts: string[] = []
-    if (book.title) {
-        parts.push(book.title)
-    }
-    if (book.barcode) {
-        parts.push(book.barcode)
-    }
-    if (book.factory_barcode) {
-        parts.push(book.factory_barcode)
-    }
-    if (book.publisher?.name) {
-        parts.push(book.publisher.name)
-    }
-    if (book.works?.length) {
-        parts.push(...book.works.map((work) => work.title))
-        parts.push(
-            ...book.works.flatMap((work) =>
-                (work.authors ?? []).map(getAuthorName)
-            )
-        )
-    }
-    if (book.description) {
-        parts.push(book.description)
-    }
-    return parts.join(" ").toLowerCase()
 }
 
 function isBookInternal(book: BookPublic | BookInternal): book is BookInternal {
@@ -351,6 +339,9 @@ export default function App() {
     const [booksError, setBooksError] = useState<string | null>(null)
     const [booksLoading, setBooksLoading] = useState(false)
     const [printError, setPrintError] = useState<string | null>(null)
+    const [printQueue, setPrintQueue] = useState<PrintQueueItem[]>([])
+    const [isPrintQueueOpen, setIsPrintQueueOpen] = useState(false)
+    const [printQueueSending, setPrintQueueSending] = useState(false)
     const [selectedBook, setSelectedBook] = useState<BookPublic | null>(null)
     const [isBookInfoOpen, setIsBookInfoOpen] = useState(false)
     const [editingBookId, setEditingBookId] = useState<string | null>(null)
@@ -358,7 +349,7 @@ export default function App() {
     const [workQuery, setWorkQuery] = useState("")
     const [selectedWork, setSelectedWork] = useState<WorkShort | null>(null)
     const [selectedWorkDetail, setSelectedWorkDetail] =
-        useState<WorkShort | null>(null)
+        useState<WorkDetailed | WorkShort | null>(null)
     const [isWorkInfoOpen, setIsWorkInfoOpen] = useState(false)
     const [workBooks, setWorkBooks] = useState<BookPublic[]>([])
     const [workBooksLoading, setWorkBooksLoading] = useState(false)
@@ -367,6 +358,7 @@ export default function App() {
     const [selectedAuthor, setSelectedAuthor] = useState<Author | null>(null)
     const [selectedAuthorId, setSelectedAuthorId] = useState<string | null>(null)
     const [isAuthorInfoOpen, setIsAuthorInfoOpen] = useState(false)
+    const [workAuthorSearch, setWorkAuthorSearch] = useState("")
 
     const [publisherQuery, setPublisherQuery] = useState("")
     const [selectedPublisher, setSelectedPublisher] = useState<Publisher | null>(
@@ -395,18 +387,7 @@ export default function App() {
         if (!booksQuery.trim()) {
             return books
         }
-        const terms = booksQuery
-            .toLowerCase()
-            .split(" ")
-            .map((term) => term.trim())
-            .filter(Boolean)
-        if (terms.length === 0) {
-            return books
-        }
-        return books.filter((book) => {
-            const haystack = getBookSearchText(book)
-            return terms.every((term) => haystack.includes(term))
-        })
+        return books
     }, [books, booksQuery])
 
     const [isBookModalOpen, setIsBookModalOpen] = useState(false)
@@ -423,6 +404,7 @@ export default function App() {
     const [selectedShelfId, setSelectedShelfId] = useState("")
 
     const [isWorkModalOpen, setIsWorkModalOpen] = useState(false)
+    const [editingWorkId, setEditingWorkId] = useState<string | null>(null)
     const [workDraft, setWorkDraft] = useState<WorkDraft>(emptyWorkDraft)
     const [workError, setWorkError] = useState<string | null>(null)
     const [workSaving, setWorkSaving] = useState(false)
@@ -564,11 +546,16 @@ export default function App() {
     }, [token])
 
     useEffect(() => {
-        if (!token || activeTab !== "books" || books.length > 0) {
+        if (
+            !token ||
+            activeTab !== "books" ||
+            books.length > 0 ||
+            booksQuery.trim()
+        ) {
             return
         }
         void loadBooksAll()
-    }, [token, activeTab, books.length])
+    }, [token, activeTab, books.length, booksQuery])
 
     useEffect(() => {
         if (isBookModalOpen && token) {
@@ -735,9 +722,40 @@ export default function App() {
         }
     }
 
+    const bookSearchSeq = useRef(0)
+
     function handleBookQueryChange(value: string) {
         const normalized = value.replace(/\s+/g, " ").trimStart()
         setBooksQuery(normalized)
+
+        const needle = normalized.trim()
+        if (!needle) {
+            void loadBooksAll()
+            return
+        }
+
+        const requestId = ++bookSearchSeq.current
+        setBooksLoading(true)
+        setBooksError(null)
+        ;(async () => {
+            try {
+                const data = isAdmin
+                    ? await searchBooksInternal(needle)
+                    : await searchBooksPublic(needle)
+                if (requestId === bookSearchSeq.current) {
+                    setBooks(data)
+                }
+            } catch {
+                if (requestId === bookSearchSeq.current) {
+                    setBooks([])
+                    setBooksError("Не удалось найти книги")
+                }
+            } finally {
+                if (requestId === bookSearchSeq.current) {
+                    setBooksLoading(false)
+                }
+            }
+        })()
     }
 
     async function handleWorkSelect(work: WorkShort, openInfo = true) {
@@ -747,6 +765,12 @@ export default function App() {
         setWorkBooks([])
         setWorkBooksLoading(true)
         try {
+            const details = await getWorkByID(work.id)
+            setSelectedWorkDetail(details)
+        } catch {
+            // keep short details
+        }
+        try {
             const data = isAdmin
                 ? await searchBooksInternal(work.title)
                 : await searchBooksPublic(work.title)
@@ -755,6 +779,73 @@ export default function App() {
             setWorkBooks([])
         } finally {
             setWorkBooksLoading(false)
+        }
+    }
+
+    function openWorkCreate() {
+        setEditingWorkId(null)
+        setWorkDraft(emptyWorkDraft)
+        setWorkAuthorSearch("")
+        setIsWorkModalOpen(true)
+    }
+
+    function openWorkEdit(work: WorkDetailed) {
+        setEditingWorkId(work.id)
+        setWorkDraft({
+            title: work.title ?? "",
+            description: work.description ?? "",
+            year: work.year ? String(work.year) : "",
+            authorIds: (work.authors ?? []).map((author) => author.id),
+        })
+        setWorkAuthorSearch("")
+        setIsWorkModalOpen(true)
+        setIsWorkInfoOpen(false)
+    }
+
+    function closeWorkModal() {
+        setIsWorkModalOpen(false)
+        setEditingWorkId(null)
+        setWorkDraft(emptyWorkDraft)
+        setWorkAuthorSearch("")
+        setWorkError(null)
+    }
+
+    async function handleDeleteWork() {
+        if (!selectedWorkDetail) {
+            return
+        }
+        if (!window.confirm("Удалить произведение?")) {
+            return
+        }
+        try {
+            await deleteWork(selectedWorkDetail.id)
+            setWorks((prev) =>
+                prev.filter((work) => work.id !== selectedWorkDetail.id)
+            )
+            setSelectedWork(null)
+            setSelectedWorkDetail(null)
+            setWorkBooks([])
+            setIsWorkInfoOpen(false)
+        } catch {
+            setWorkError("Не удалось удалить произведение")
+        }
+    }
+
+    async function openWorkEditFromSelection() {
+        if (!selectedWorkDetail) {
+            return
+        }
+        try {
+            const details = await getWorkByID(selectedWorkDetail.id)
+            openWorkEdit(details)
+        } catch {
+            openWorkEdit({
+                id: selectedWorkDetail.id,
+                title: selectedWorkDetail.title,
+                description: "",
+                year: selectedWorkDetail.year,
+                authors: selectedWorkDetail.authors ?? [],
+            })
         }
     }
 
@@ -949,6 +1040,11 @@ export default function App() {
                     },
                     works: worksPayload,
                 })
+                if (!created.works || created.works.length === 0) {
+                    created.works = works.filter((work) =>
+                        bookDraft.workIds.includes(work.id)
+                    )
+                }
                 if (coverFile) {
                     try {
                         const coverUrl = await uploadImage(
@@ -967,6 +1063,7 @@ export default function App() {
                         )
                     }
                 }
+                addBookToPrintQueue(created)
             }
             setBookDraft(emptyBookDraft)
             setCoverFile(null)
@@ -988,6 +1085,7 @@ export default function App() {
     }
 
     async function handleCreateWork() {
+        const isEditing = Boolean(editingWorkId)
         if (!workDraft.title.trim()) {
             setWorkError("Название произведения обязательно")
             return
@@ -995,39 +1093,80 @@ export default function App() {
         setWorkSaving(true)
         setWorkError(null)
         try {
-            const created = await createWork({
-                work: {
+            if (isEditing && editingWorkId) {
+                await updateWork(editingWorkId, {
                     title: workDraft.title.trim(),
-                    description: workDraft.description.trim() || undefined,
+                    description: workDraft.description.trim(),
                     year: workDraft.year ? Number(workDraft.year) : undefined,
-                },
-                authors: workDraft.authorIds,
-            })
-            const selectedAuthors = authors.filter((author) =>
-                workDraft.authorIds.includes(author.id)
-            )
-            const year = workDraft.year ? Number(workDraft.year) : undefined
-            setWorks((prev) => [
-                {
-                    id: created.id,
-                    title: created.title,
-                    authors: selectedAuthors,
-                    year,
-                },
-                ...prev,
-            ])
-            setWorkDraft(emptyWorkDraft)
-            setIsWorkModalOpen(false)
-            if (isBookModalOpen) {
-                setBookDraft((prev) => ({
+                    authors: workDraft.authorIds,
+                })
+                const selectedAuthors = authors.filter((author) =>
+                    workDraft.authorIds.includes(author.id)
+                )
+                const year = workDraft.year ? Number(workDraft.year) : undefined
+                setWorks((prev) =>
+                    prev.map((work) =>
+                        work.id === editingWorkId
+                            ? {
+                                  ...work,
+                                  title: workDraft.title.trim(),
+                                  authors: selectedAuthors,
+                                  year,
+                              }
+                            : work
+                    )
+                )
+                setSelectedWorkDetail((prev) =>
+                    prev && prev.id === editingWorkId
+                        ? {
+                              ...prev,
+                              title: workDraft.title.trim(),
+                              description: workDraft.description.trim(),
+                              year,
+                              authors: selectedAuthors,
+                          }
+                        : prev
+                )
+            } else {
+                const created = await createWork({
+                    work: {
+                        title: workDraft.title.trim(),
+                        description: workDraft.description.trim() || undefined,
+                        year: workDraft.year ? Number(workDraft.year) : undefined,
+                    },
+                    authors: workDraft.authorIds,
+                })
+                const selectedAuthors = authors.filter((author) =>
+                    workDraft.authorIds.includes(author.id)
+                )
+                const year = workDraft.year ? Number(workDraft.year) : undefined
+                setWorks((prev) => [
+                    {
+                        id: created.id,
+                        title: created.title,
+                        authors: selectedAuthors,
+                        year,
+                    },
                     ...prev,
-                    workIds: prev.workIds.includes(created.id)
-                        ? prev.workIds
-                        : [...prev.workIds, created.id],
-                }))
+                ])
+                if (isBookModalOpen) {
+                    setBookDraft((prev) => ({
+                        ...prev,
+                        workIds: prev.workIds.includes(created.id)
+                            ? prev.workIds
+                            : [...prev.workIds, created.id],
+                    }))
+                }
             }
+            setWorkDraft(emptyWorkDraft)
+            setEditingWorkId(null)
+            setIsWorkModalOpen(false)
         } catch {
-            setWorkError("Не удалось создать произведение")
+            setWorkError(
+                isEditing
+                    ? "Не удалось обновить произведение"
+                    : "Не удалось создать произведение"
+            )
         } finally {
             setWorkSaving(false)
         }
@@ -1369,6 +1508,59 @@ export default function App() {
         }
     }
 
+    function addBookToPrintQueue(book: BookPublic) {
+        const barcode = (book.barcode ?? "").trim()
+        if (!barcode) {
+            setPrintError("Штрихкод отсутствует")
+            return
+        }
+        const authorsLine = getBookAuthorsLine(book)
+        setPrintError(null)
+        setPrintQueue((prev) => {
+            if (prev.some((item) => item.barcode === barcode)) {
+                return prev
+            }
+            return [
+                ...prev,
+                {
+                    id: book.id,
+                    title: book.title,
+                    authors: authorsLine,
+                    barcode,
+                },
+            ]
+        })
+        setIsPrintQueueOpen(true)
+    }
+
+    async function sendPrintQueue() {
+        if (printQueue.length === 0) {
+            setPrintError("Очередь печати пуста")
+            return
+        }
+        setPrintQueueSending(true)
+        setPrintError(null)
+        try {
+            for (const item of printQueue) {
+                await sendPrintTask({
+                    str1: item.authors || "—",
+                    str2: item.title,
+                    barcode: item.barcode,
+                })
+            }
+            setPrintQueue([])
+            setIsPrintQueueOpen(false)
+        } catch (err) {
+            if (err instanceof ApiError) {
+                setPrintError(err.message)
+            } else {
+                setPrintError("Не удалось отправить очередь на печать")
+            }
+        } finally {
+            setPrintQueueSending(false)
+        }
+    }
+
     async function toggleLocation(location: LocationEntity) {
         const id = location.id
         const isExpanded = expandedLocations.has(id)
@@ -1592,6 +1784,100 @@ export default function App() {
                     <h1>Поиск фонда и управление каталогом</h1>
                 </div>
                 <div className="user-block">
+                    <div className="print-queue">
+                        <button
+                            className="print-queue-button"
+                            type="button"
+                            onClick={() =>
+                                setIsPrintQueueOpen((prev) => !prev)
+                            }
+                            aria-label="Открыть очередь печати"
+                        >
+                            Очередь
+                            <span className="print-queue-count">
+                                {printQueue.length}
+                            </span>
+                        </button>
+                        {isPrintQueueOpen && (
+                            <div className="print-queue-panel">
+                                <div className="print-queue-header">
+                                    <strong>Очередь печати</strong>
+                                    <button
+                                        className="icon-button close-button"
+                                        type="button"
+                                        onClick={() =>
+                                            setIsPrintQueueOpen(false)
+                                        }
+                                    >
+                                        ✕
+                                    </button>
+                                </div>
+                                <div className="print-queue-list">
+                                    {printQueue.length === 0 && (
+                                        <p className="status-line">
+                                            Очередь пуста
+                                        </p>
+                                    )}
+                                    {printQueue.map((item) => (
+                                        <div
+                                            key={item.barcode}
+                                            className="print-queue-item"
+                                        >
+                                            <div>
+                                                <div className="print-queue-title">
+                                                    {item.title}
+                                                </div>
+                                                <div className="item-meta">
+                                                    {item.authors || "—"}
+                                                </div>
+                                                <div className="item-meta">
+                                                    {item.barcode}
+                                                </div>
+                                            </div>
+                                            <button
+                                                className="ghost-button"
+                                                type="button"
+                                                onClick={() =>
+                                                    setPrintQueue((prev) =>
+                                                        prev.filter(
+                                                            (entry) =>
+                                                                entry.barcode !==
+                                                                item.barcode
+                                                        )
+                                                    )
+                                                }
+                                            >
+                                                Убрать
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="print-queue-actions">
+                                    <button
+                                        className="ghost-button"
+                                        type="button"
+                                        onClick={() => setPrintQueue([])}
+                                        disabled={printQueue.length === 0}
+                                    >
+                                        Очистить
+                                    </button>
+                                    <button
+                                        className="primary-button"
+                                        type="button"
+                                        onClick={sendPrintQueue}
+                                        disabled={
+                                            printQueueSending ||
+                                            printQueue.length === 0
+                                        }
+                                    >
+                                        {printQueueSending
+                                            ? "Печать..."
+                                            : "Печать"}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
                     {user && token ? (
                         <>
                             <button
@@ -1704,6 +1990,7 @@ export default function App() {
                             onClick={() => {
                                 setBooksQuery("")
                                 setBooksError(null)
+                                void loadBooksAll()
                             }}
                             disabled={booksLoading || booksQuery.length === 0}
                         >
@@ -1717,7 +2004,7 @@ export default function App() {
                         booksQuery && (
                         <p className="status-line">Нет результатов</p>
                     )}
-                    <div className="card-grid">
+                    <div className="card-grid books-grid">
                         {filteredBooks.map((book) => (
                             <article
                                 key={book.id}
@@ -1758,33 +2045,6 @@ export default function App() {
                                                     "Без издательства"}
                                             </p>
                                             {book.year && <p>{book.year}</p>}
-                                            {isAdmin && "location" in book && (
-                                                <p>
-                                                    <strong>Локация:</strong>{" "}
-                                                    {formatLocation(
-                                                        (book as BookInternal)
-                                                            .location
-                                                    )}
-                                                </p>
-                                            )}
-                                            {isAdmin && (
-                                                <button
-                                                    className="ghost-button"
-                                                    type="button"
-                                                    onClick={(event) => {
-                                                        event.stopPropagation()
-                                                        handlePrintTask({
-                                                            str1: getBookAuthorsLine(
-                                                                book
-                                                            ),
-                                                            str2: book.title,
-                                                            barcode: book.barcode,
-                                                        })
-                                                    }}
-                                                >
-                                                    Печать штрихкода
-                                                </button>
-                                            )}
                                         </div>
                                     </div>
                                 </div>
@@ -1808,7 +2068,7 @@ export default function App() {
                             <button
                                 className="primary-button"
                                 type="button"
-                                onClick={() => setIsWorkModalOpen(true)}
+                                onClick={openWorkCreate}
                             >
                                 Добавить произведение
                             </button>
@@ -2433,8 +2693,9 @@ export default function App() {
                                                 <option
                                                     key={publisher.id}
                                                     value={publisher.id}
+                                                    title={publisher.name}
                                                 >
-                                                    {publisher.name}
+                                                    {truncateLabel(publisher.name)}
                                                 </option>
                                             ))}
                                         </select>
@@ -2733,9 +2994,7 @@ export default function App() {
                                         <button
                                             className="ghost-button"
                                             type="button"
-                                            onClick={() =>
-                                                setIsWorkModalOpen(true)
-                                            }
+                                            onClick={openWorkCreate}
                                             aria-label="Добавить произведение"
                                         >
                                             +
@@ -3008,7 +3267,7 @@ export default function App() {
                                     {(selectedBook.works ?? []).length === 0 && (
                                         <p className="status-line">Нет данных</p>
                                     )}
-                                    <div className="stack">
+                                    <div className="stack book-info-works">
                                         {(selectedBook.works ?? []).map((work) => (
                                             <button
                                                 key={work.id}
@@ -3063,6 +3322,15 @@ export default function App() {
                                 <button
                                     className="ghost-button"
                                     type="button"
+                                    onClick={() =>
+                                        addBookToPrintQueue(selectedBook)
+                                    }
+                                >
+                                    В очередь печати
+                                </button>
+                                <button
+                                    className="ghost-button"
+                                    type="button"
                                     onClick={() => openBookEdit(selectedBook)}
                                 >
                                     Изменить
@@ -3077,11 +3345,15 @@ export default function App() {
                 <div className="modal-backdrop">
                     <div className="modal">
                         <div className="modal-header">
-                            <h3>Новое произведение</h3>
+                            <h3>
+                                {editingWorkId
+                                    ? "Изменить произведение"
+                                    : "Новое произведение"}
+                            </h3>
                             <button
                                 className="icon-button close-button"
                                 type="button"
-                                onClick={() => setIsWorkModalOpen(false)}
+                                onClick={closeWorkModal}
                             >
                                 ✕
                             </button>
@@ -3140,50 +3412,163 @@ export default function App() {
                                         +
                                     </button>
                                 </div>
-                                <div className="checkbox-grid">
-                                    {authors.map((author) => {
-                                        const isSelected = workDraft.authorIds.includes(
-                                            author.id
-                                        )
-                                        return (
-                                            <div
-                                                key={author.id}
-                                                className="author-row"
-                                            >
-                                                <span>{getAuthorName(author)}</span>
-                                                <button
-                                                    className={`icon-plus-button ${
-                                                        isSelected
-                                                            ? "icon-minus"
-                                                            : ""
-                                                    }`}
-                                                    type="button"
-                                                    onClick={() => {
-                                                        setWorkDraft((prev) => ({
-                                                            ...prev,
-                                                            authorIds: isSelected
-                                                                ? prev.authorIds.filter(
-                                                                      (id) =>
-                                                                          id !==
-                                                                          author.id
-                                                                  )
-                                                                : [
-                                                                      ...prev.authorIds,
-                                                                      author.id,
-                                                                  ],
-                                                        }))
-                                                    }}
-                                                    aria-label={
-                                                        isSelected
-                                                            ? "Убрать автора"
-                                                            : "Добавить автора"
+                                <div className="work-picker">
+                                    <label className="field-label">
+                                        Поиск
+                                        <input
+                                            className="text-input"
+                                            placeholder="Начните вводить имя"
+                                            value={workAuthorSearch}
+                                            onChange={(event) =>
+                                                setWorkAuthorSearch(
+                                                    event.target.value
+                                                )
+                                            }
+                                        />
+                                    </label>
+                                    <div className="work-picker-columns">
+                                        <div className="work-picker-panel">
+                                            <h5>Найденные авторы</h5>
+                                            <div className="stack">
+                                                {authors
+                                                    .filter((author) => {
+                                                        if (
+                                                            workDraft.authorIds.includes(
+                                                                author.id
+                                                            )
+                                                        ) {
+                                                            return false
+                                                        }
+                                                        const query =
+                                                            workAuthorSearch
+                                                                .trim()
+                                                                .toLowerCase()
+                                                        if (!query) {
+                                                            return true
+                                                        }
+                                                        return getAuthorName(
+                                                            author
+                                                        )
+                                                            .toLowerCase()
+                                                            .includes(query)
+                                                    })
+                                                    .map((author) => (
+                                                        <div
+                                                            key={author.id}
+                                                            className="work-picker-row"
+                                                        >
+                                                            <div>
+                                                                <div className="work-title">
+                                                                    {getAuthorName(
+                                                                        author
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                            <button
+                                                                className="ghost-button"
+                                                                type="button"
+                                                                onClick={() =>
+                                                                    setWorkDraft(
+                                                                        (prev) => ({
+                                                                            ...prev,
+                                                                            authorIds:
+                                                                                [
+                                                                                    ...prev.authorIds,
+                                                                                    author.id,
+                                                                                ],
+                                                                        })
+                                                                    )
+                                                                }
+                                                            >
+                                                                Добавить
+                                                            </button>
+                                                        </div>
+                                                    ))}
+                                                {authors.filter((author) => {
+                                                    if (
+                                                        workDraft.authorIds.includes(
+                                                            author.id
+                                                        )
+                                                    ) {
+                                                        return false
                                                     }
-                                                >
-                                                    {isSelected ? "−" : "+"}
-                                                </button>
+                                                    const query =
+                                                        workAuthorSearch
+                                                            .trim()
+                                                            .toLowerCase()
+                                                    if (!query) {
+                                                        return true
+                                                    }
+                                                    return getAuthorName(author)
+                                                        .toLowerCase()
+                                                        .includes(query)
+                                                }).length === 0 && (
+                                                    <p className="status-line">
+                                                        Ничего не найдено
+                                                    </p>
+                                                )}
                                             </div>
-                                        )
-                                    })}
+                                        </div>
+                                        <div className="work-picker-panel">
+                                            <h5>Выбранные авторы</h5>
+                                            <div className="stack">
+                                                {workDraft.authorIds.length ===
+                                                    0 && (
+                                                    <p className="status-line">
+                                                        Пока нет выбранных
+                                                    </p>
+                                                )}
+                                                {workDraft.authorIds.map(
+                                                    (authorId) => {
+                                                        const author =
+                                                            authors.find(
+                                                                (item) =>
+                                                                    item.id ===
+                                                                    authorId
+                                                            )
+                                                        if (!author) {
+                                                            return null
+                                                        }
+                                                        return (
+                                                            <div
+                                                                key={author.id}
+                                                                className="work-picker-row"
+                                                            >
+                                                                <div>
+                                                                    <div className="work-title">
+                                                                        {getAuthorName(
+                                                                            author
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                                <button
+                                                                    className="ghost-button"
+                                                                    type="button"
+                                                                    onClick={() =>
+                                                                        setWorkDraft(
+                                                                            (prev) => ({
+                                                                                ...prev,
+                                                                                authorIds:
+                                                                                    prev.authorIds.filter(
+                                                                                        (
+                                                                                            id
+                                                                                        ) =>
+                                                                                            id !==
+                                                                                            author.id
+                                                                                    ),
+                                                                            })
+                                                                        )
+                                                                    }
+                                                                >
+                                                                    Убрать
+                                                                </button>
+                                                            </div>
+                                                        )
+                                                    }
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                             {workError && (
@@ -3199,6 +3584,8 @@ export default function App() {
                             >
                                 {workSaving
                                     ? "Сохранение..."
+                                    : editingWorkId
+                                    ? "Сохранить"
                                     : "Добавить произведение"}
                             </button>
                         </div>
@@ -4087,7 +4474,16 @@ export default function App() {
                                 <button
                                     className="ghost-button"
                                     type="button"
-                                    onClick={() => setIsWorkModalOpen(true)}
+                                    onClick={handleDeleteWork}
+                                    disabled={!selectedWorkDetail}
+                                >
+                                    Удалить
+                                </button>
+                                <button
+                                    className="ghost-button"
+                                    type="button"
+                                    onClick={openWorkEditFromSelection}
+                                    disabled={!selectedWorkDetail}
                                 >
                                     Изменить
                                 </button>
