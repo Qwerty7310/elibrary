@@ -222,6 +222,21 @@ func (r *LocationRepository) GetByBarcode(ctx context.Context, barcode string) (
 	return &location, nil
 }
 
+func (r *LocationRepository) HasChildren(ctx context.Context, id uuid.UUID) (bool, error) {
+	var exists bool
+	err := r.db.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM locations
+			WHERE parent_id = $1
+		)
+	`, id).Scan(&exists)
+	if err != nil {
+		return false, err
+	}
+	return exists, nil
+}
+
 func (r *LocationRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	res, err := r.db.Exec(ctx, `
 		DELETE FROM locations

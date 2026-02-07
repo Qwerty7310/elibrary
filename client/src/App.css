@@ -1366,6 +1366,13 @@ select.text-input {
   cursor: pointer;
 }
 
+.ghost-button:disabled {
+  border-color: rgba(120, 120, 120, 0.35);
+  color: rgba(90, 90, 90, 0.75);
+  background: rgba(190, 190, 190, 0.2);
+  cursor: not-allowed;
+}
+
 .tag {
   padding: 6px 10px;
   border-radius: 999px;
@@ -1383,17 +1390,17 @@ select.text-input {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(120, 96, 70, 0.18);
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 8px 18px rgba(60, 42, 24, 0.08);
 }
 
 .location-row {
   display: flex;
   align-items: stretch;
   gap: 12px;
-  padding: 12px 14px;
-  border-radius: 14px;
-  border: 1px solid rgba(120, 96, 70, 0.18);
-  background: rgba(255, 255, 255, 0.85);
-  box-shadow: 0 8px 18px rgba(60, 42, 24, 0.08);
 }
 
 .icon-button {
@@ -1492,8 +1499,6 @@ select.text-input {
   flex-direction: column;
   gap: 6px;
   margin-left: 28px;
-  padding-left: 12px;
-  border-left: 2px solid rgba(120, 96, 70, 0.15);
 }
 
 .icon-rotated {

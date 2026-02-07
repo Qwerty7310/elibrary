@@ -17,8 +17,10 @@ import {
 import {createWork, deleteWork, getWorkByID, updateWork} from "./api/works"
 import {
     createLocation,
+    deleteLocation,
     getLocationChildren,
     getLocationsByType,
+    updateLocation,
 } from "./api/locations"
 import {sendPrintTask} from "./api/print"
 import {
@@ -378,9 +380,15 @@ export default function App() {
     const [isLocationInfoOpen, setIsLocationInfoOpen] = useState(false)
     const [locationInfoLoading, setLocationInfoLoading] = useState(false)
     const [locationInfoError, setLocationInfoError] = useState<string | null>(null)
+    const [locationInfoHasChildren, setLocationInfoHasChildren] = useState(false)
     const [locationInfoGroups, setLocationInfoGroups] = useState<
         Array<{location: LocationEntity; books: BookInternal[]}>
     >([])
+    const [isLocationEditOpen, setIsLocationEditOpen] = useState(false)
+    const [locationEditName, setLocationEditName] = useState("")
+    const [locationEditSaving, setLocationEditSaving] = useState(false)
+    const [locationEditError, setLocationEditError] = useState<string | null>(null)
+    const [locationDeleteSaving, setLocationDeleteSaving] = useState(false)
 
     const [booksQuery, setBooksQuery] = useState("")
     const [books, setBooks] = useState<BookPublic[]>([])
@@ -1625,9 +1633,22 @@ export default function App() {
         const id = location.id
         const isExpanded = expandedLocations.has(id)
         if (isExpanded) {
+            const collectDescendantIDs = (rootID: string): string[] => {
+                const children = locationChildren[rootID] ?? []
+                const result: string[] = []
+                for (const child of children) {
+                    result.push(child.id)
+                    result.push(...collectDescendantIDs(child.id))
+                }
+                return result
+            }
+            const descendantIDs = new Set(collectDescendantIDs(id))
             setExpandedLocations((prev) => {
                 const next = new Set(prev)
                 next.delete(id)
+                for (const descendantID of descendantIDs) {
+                    next.delete(descendantID)
+                }
                 return next
             })
             return
@@ -1803,14 +1824,25 @@ export default function App() {
         setIsLocationInfoOpen(true)
         setLocationInfoLoading(true)
         setLocationInfoError(null)
+        setLocationInfoHasChildren(false)
         try {
+            const childType = getChildType(location.type)
+            if (childType) {
+                const directChildren =
+                    locationChildren[location.id] ??
+                    ((await getLocationChildren(location.id, childType)) ?? [])
+                setLocationChildren((prev) => ({
+                    ...prev,
+                    [location.id]: directChildren,
+                }))
+                setLocationInfoHasChildren(directChildren.length > 0)
+            }
             if (location.type === "building" || location.type === "room") {
                 setLocationInfoGroups([])
                 return
             }
             await ensureLocationSubtree(location)
             const books = await searchBooksInternal("")
-            const childType = getChildType(location.type)
             let descendants = locationChildren[location.id] ?? []
             if (childType && descendants.length === 0) {
                 descendants = (await getLocationChildren(location.id, childType)) ?? []
@@ -1842,6 +1874,123 @@ export default function App() {
             setLocationInfoGroups([])
         } finally {
             setLocationInfoLoading(false)
+        }
+    }
+
+    function openLocationEdit() {
+        if (!selectedLocation) {
+            return
+        }
+        setLocationEditName(selectedLocation.name)
+        setLocationEditError(null)
+        setIsLocationEditOpen(true)
+    }
+
+    async function handleLocationEditSave() {
+        if (!selectedLocation) {
+            return
+        }
+        if (!locationEditName.trim()) {
+            setLocationEditError("Название обязательно")
+            return
+        }
+        setLocationEditSaving(true)
+        setLocationEditError(null)
+        try {
+            await updateLocation(selectedLocation.id, {name: locationEditName.trim()})
+            const nextName = locationEditName.trim()
+            setSelectedLocation((prev) =>
+                prev ? {...prev, name: nextName} : prev
+            )
+            setLocationByType((prev) => {
+                const next = {...prev}
+                for (const key of Object.keys(next)) {
+                    next[key] = (next[key] ?? []).map((item) =>
+                        item.id === selectedLocation.id
+                            ? {...item, name: nextName}
+                            : item
+                    )
+                }
+                return next
+            })
+            setLocationChildren((prev) => {
+                const next = {...prev}
+                for (const key of Object.keys(next)) {
+                    next[key] = (next[key] ?? []).map((item) =>
+                        item.id === selectedLocation.id
+                            ? {...item, name: nextName}
+                            : item
+                    )
+                }
+                return next
+            })
+            setLocationInfoGroups((prev) =>
+                prev.map((group) =>
+                    group.location.id === selectedLocation.id
+                        ? {
+                              ...group,
+                              location: {...group.location, name: nextName},
+                          }
+                        : group
+                )
+            )
+            setIsLocationEditOpen(false)
+        } catch (err) {
+            if (err instanceof ApiError) {
+                setLocationEditError(err.message)
+            } else {
+                setLocationEditError("Не удалось обновить локацию")
+            }
+        } finally {
+            setLocationEditSaving(false)
+        }
+    }
+
+    async function handleLocationDelete() {
+        if (!selectedLocation || locationInfoHasChildren) {
+            return
+        }
+        if (!window.confirm("Удалить локацию?")) {
+            return
+        }
+        setLocationDeleteSaving(true)
+        setLocationInfoError(null)
+        try {
+            await deleteLocation(selectedLocation.id)
+            setLocationByType((prev) => {
+                const next = {...prev}
+                for (const key of Object.keys(next)) {
+                    next[key] = (next[key] ?? []).filter(
+                        (item) => item.id !== selectedLocation.id
+                    )
+                }
+                return next
+            })
+            setLocationChildren((prev) => {
+                const next = {...prev}
+                for (const key of Object.keys(next)) {
+                    next[key] = (next[key] ?? []).filter(
+                        (item) => item.id !== selectedLocation.id
+                    )
+                }
+                delete next[selectedLocation.id]
+                return next
+            })
+            setExpandedLocations((prev) => {
+                const next = new Set(prev)
+                next.delete(selectedLocation.id)
+                return next
+            })
+            setIsLocationInfoOpen(false)
+            setSelectedLocation(null)
+        } catch (err) {
+            if (err instanceof ApiError) {
+                setLocationInfoError(err.message)
+            } else {
+                setLocationInfoError("Не удалось удалить локацию")
+            }
+        } finally {
+            setLocationDeleteSaving(false)
         }
     }
 
@@ -2865,6 +3014,35 @@ export default function App() {
                                 <button
                                     className="ghost-button"
                                     type="button"
+                                    onClick={openLocationEdit}
+                                    disabled={locationDeleteSaving}
+                                >
+                                    Изменить
+                                </button>
+                                <span
+                                    title={
+                                        locationInfoHasChildren
+                                            ? "Нельзя удалить локацию, если у нее есть дочерние"
+                                            : ""
+                                    }
+                                >
+                                    <button
+                                        className="ghost-button"
+                                        type="button"
+                                        onClick={handleLocationDelete}
+                                        disabled={
+                                            locationDeleteSaving ||
+                                            locationInfoHasChildren
+                                        }
+                                    >
+                                        {locationDeleteSaving
+                                            ? "Удаление..."
+                                            : "Удалить"}
+                                    </button>
+                                </span>
+                                <button
+                                    className="ghost-button"
+                                    type="button"
                                     onClick={() =>
                                         handlePrintTask({
                                             str1: selectedLocation.name,
@@ -2879,6 +3057,50 @@ export default function App() {
                                 </button>
                             </div>
                         )}
+                    </div>
+                </div>
+            )}
+
+            {isLocationEditOpen && selectedLocation && (
+                <div className="modal-backdrop modal-backdrop-top">
+                    <div className="modal">
+                        <div className="modal-header">
+                            <h3>Изменить локацию</h3>
+                            <button
+                                className="icon-button close-button"
+                                type="button"
+                                onClick={() => setIsLocationEditOpen(false)}
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <div className="modal-body">
+                            <label className="field-label">
+                                Название
+                                <input
+                                    className="text-input"
+                                    value={locationEditName}
+                                    onChange={(event) =>
+                                        setLocationEditName(event.target.value)
+                                    }
+                                />
+                            </label>
+                            {locationEditError && (
+                                <p className="error-banner">{locationEditError}</p>
+                            )}
+                        </div>
+                        <div className="modal-footer">
+                            <button
+                                className="primary-button"
+                                type="button"
+                                onClick={handleLocationEditSave}
+                                disabled={locationEditSaving}
+                            >
+                                {locationEditSaving
+                                    ? "Сохранение..."
+                                    : "Сохранить"}
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

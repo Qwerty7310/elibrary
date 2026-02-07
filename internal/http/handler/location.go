@@ -219,6 +219,14 @@ func (h *LocationHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "location not found", http.StatusNotFound)
 			return
 		}
+		if errors.Is(err, service.ErrLocationHasChildren) {
+			http.Error(
+				w,
+				"cannot delete location with child locations",
+				http.StatusConflict,
+			)
+			return
+		}
 		log.Printf("error deleting location %s: %v", idStr, err)
 		http.Error(w, "error deleting location", http.StatusInternalServerError)
 		return

@@ -20,6 +20,7 @@ var (
 	ErrParentNotFound           = errors.New("parent not found")
 	ErrLocationCannotHaveParent = errors.New("location can not have parent")
 	ErrInvalidLocationType      = errors.New("invalid location type")
+	ErrLocationHasChildren      = errors.New("location has children")
 )
 
 func NewLocationService(locRepo repository.LocationRepository, barcodeSvc *BarcodeService) *LocationService {
@@ -179,7 +180,15 @@ func (s *LocationService) GetByBarcode(ctx context.Context, barcode string) (*do
 }
 
 func (s *LocationService) Delete(ctx context.Context, id uuid.UUID) error {
-	err := s.locRepo.Delete(ctx, id)
+	hasChildren, err := s.locRepo.HasChildren(ctx, id)
+	if err != nil {
+		return err
+	}
+	if hasChildren {
+		return ErrLocationHasChildren
+	}
+
+	err = s.locRepo.Delete(ctx, id)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return domain.ErrNotFound

@@ -14,6 +14,19 @@ export function createLocation(payload: {
     })
 }
 
+export function updateLocation(id: string, payload: {name?: string}) {
+    return requestJson<void>(`/admin/locations/${encodeURIComponent(id)}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+    })
+}
+
+export function deleteLocation(id: string) {
+    return requestJson<void>(`/admin/locations/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+    })
+}
+
 export function getLocationsByType(type: string) {
     return requestJson<LocationEntity[] | null>(
         `/locations/type/${encodeURIComponent(type)}`
