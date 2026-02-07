@@ -27,7 +27,7 @@ import {
     getWorksReference,
 } from "./api/reference"
 import {API_URL, ApiError, setToken} from "./api/http"
-import {getUserByID, updateUser} from "./api/users"
+import {createUser, getUserByID, updateUser} from "./api/users"
 import {SafeImage} from "./components/SafeImage"
 import {uploadImage} from "./api/images"
 import type {
@@ -100,6 +100,45 @@ type PrintQueueItem = {
     authors: string
     barcode: string
 }
+
+type RoleOption = {
+    id: number
+    code: string
+    name: string
+    permissions: string[]
+}
+
+const ROLE_OPTIONS: RoleOption[] = [
+    {
+        id: 1,
+        code: "admin",
+        name: "Администратор",
+        permissions: [
+            "Просмотр детальной информации о книге",
+            "Просмотр локаций",
+            "Добавление книг",
+            "Редактирование книг",
+            "Удаление книг",
+        ],
+    },
+    {
+        id: 2,
+        code: "librarian",
+        name: "Библиотекарь",
+        permissions: [
+            "Просмотр детальной информации о книге",
+            "Просмотр локаций",
+            "Добавление книг",
+            "Редактирование книг",
+        ],
+    },
+    {
+        id: 3,
+        code: "reader",
+        name: "Читатель",
+        permissions: ["Просмотр детальной информации о книге"],
+    },
+]
 
 const emptyBookDraft: BookDraft = {
     title: "",
@@ -333,6 +372,15 @@ export default function App() {
     )
     const [locationsError, setLocationsError] = useState<string | null>(null)
     const [locationsLoaded, setLocationsLoaded] = useState(false)
+    const [selectedLocation, setSelectedLocation] = useState<LocationEntity | null>(
+        null
+    )
+    const [isLocationInfoOpen, setIsLocationInfoOpen] = useState(false)
+    const [locationInfoLoading, setLocationInfoLoading] = useState(false)
+    const [locationInfoError, setLocationInfoError] = useState<string | null>(null)
+    const [locationInfoGroups, setLocationInfoGroups] = useState<
+        Array<{location: LocationEntity; books: BookInternal[]}>
+    >([])
 
     const [booksQuery, setBooksQuery] = useState("")
     const [books, setBooks] = useState<BookPublic[]>([])
@@ -462,6 +510,18 @@ export default function App() {
     })
     const [profileError, setProfileError] = useState<string | null>(null)
     const [profileSaving, setProfileSaving] = useState(false)
+    const [isUserCreateOpen, setIsUserCreateOpen] = useState(false)
+    const [userCreateDraft, setUserCreateDraft] = useState({
+        login: "",
+        first_name: "",
+        last_name: "",
+        middle_name: "",
+        email: "",
+        password: "",
+        roleCodes: [] as string[],
+    })
+    const [userCreateSaving, setUserCreateSaving] = useState(false)
+    const [userCreateError, setUserCreateError] = useState<string | null>(null)
 
     useEffect(() => {
         if (!token) {
@@ -1625,6 +1685,73 @@ export default function App() {
         }
     }
 
+    function openUserCreate() {
+        setUserCreateDraft({
+            login: "",
+            first_name: "",
+            last_name: "",
+            middle_name: "",
+            email: "",
+            password: "",
+            roleCodes: [],
+        })
+        setUserCreateError(null)
+        setIsUserCreateOpen(true)
+    }
+
+    function closeUserCreate() {
+        setIsUserCreateOpen(false)
+        setUserCreateError(null)
+    }
+
+    async function handleCreateUser() {
+        if (!userCreateDraft.login.trim()) {
+            setUserCreateError("Логин обязателен")
+            return
+        }
+        if (!userCreateDraft.first_name.trim()) {
+            setUserCreateError("Имя обязательно")
+            return
+        }
+        if (!userCreateDraft.password.trim()) {
+            setUserCreateError("Пароль обязателен")
+            return
+        }
+        if (userCreateDraft.roleCodes.length === 0) {
+            setUserCreateError("Выберите хотя бы одну роль")
+            return
+        }
+        setUserCreateSaving(true)
+        setUserCreateError(null)
+        try {
+            const roles = ROLE_OPTIONS.filter((role) =>
+                userCreateDraft.roleCodes.includes(role.code)
+            ).map((role) => ({
+                id: role.id,
+                code: role.code,
+                name: role.name,
+            }))
+            await createUser({
+                login: userCreateDraft.login.trim(),
+                first_name: userCreateDraft.first_name.trim(),
+                last_name: userCreateDraft.last_name.trim() || undefined,
+                middle_name: userCreateDraft.middle_name.trim() || undefined,
+                email: userCreateDraft.email.trim() || undefined,
+                password: userCreateDraft.password,
+                roles,
+            })
+            setIsUserCreateOpen(false)
+        } catch (err) {
+            if (err instanceof ApiError) {
+                setUserCreateError(err.message)
+            } else {
+                setUserCreateError("Не удалось создать пользователя")
+            }
+        } finally {
+            setUserCreateSaving(false)
+        }
+    }
+
     useEffect(() => {
         if (activeTab === "locations" && token) {
             loadBuildingLocations()
@@ -1636,6 +1763,86 @@ export default function App() {
         if (type === "room") return "cabinet"
         if (type === "cabinet") return "shelf"
         return null
+    }
+
+    function getBookLocationIDByType(book: BookInternal, type: string) {
+        if (!book.location) {
+            return ""
+        }
+        if (type === "building") return book.location.building_id ?? ""
+        if (type === "room") return book.location.room_id ?? ""
+        if (type === "cabinet") return book.location.cabinet_id ?? ""
+        if (type === "shelf") return book.location.shelf_id ?? ""
+        return ""
+    }
+
+    async function ensureLocationSubtree(root: LocationEntity) {
+        async function walk(parent: LocationEntity): Promise<void> {
+            const childType = getChildType(parent.type)
+            if (!childType) {
+                return
+            }
+            let children = locationChildren[parent.id]
+            if (!children) {
+                const data = await getLocationChildren(parent.id, childType)
+                children = data ?? []
+                setLocationChildren((prev) => ({
+                    ...prev,
+                    [parent.id]: children ?? [],
+                }))
+            }
+            for (const child of children) {
+                await walk(child)
+            }
+        }
+        await walk(root)
+    }
+
+    async function openLocationInfo(location: LocationEntity) {
+        setSelectedLocation(location)
+        setIsLocationInfoOpen(true)
+        setLocationInfoLoading(true)
+        setLocationInfoError(null)
+        try {
+            if (location.type === "building" || location.type === "room") {
+                setLocationInfoGroups([])
+                return
+            }
+            await ensureLocationSubtree(location)
+            const books = await searchBooksInternal("")
+            const childType = getChildType(location.type)
+            let descendants = locationChildren[location.id] ?? []
+            if (childType && descendants.length === 0) {
+                descendants = (await getLocationChildren(location.id, childType)) ?? []
+                setLocationChildren((prev) => ({
+                    ...prev,
+                    [location.id]: descendants,
+                }))
+            }
+            if (descendants.length === 0) {
+                const own = books.filter((book) =>
+                    getBookLocationIDByType(book, location.type) === location.id
+                )
+                setLocationInfoGroups([{location, books: own}])
+            } else {
+                const groups = descendants.map((child) => ({
+                    location: child,
+                    books: books.filter((book) => {
+                        const childLocationID = getBookLocationIDByType(
+                            book,
+                            child.type
+                        )
+                        return childLocationID === child.id
+                    }),
+                }))
+                setLocationInfoGroups(groups)
+            }
+        } catch {
+            setLocationInfoError("Не удалось загрузить информацию о локации")
+            setLocationInfoGroups([])
+        } finally {
+            setLocationInfoLoading(false)
+        }
     }
 
     function openAddLocation(type: string, parentId = "") {
@@ -1683,7 +1890,18 @@ export default function App() {
                             <span className="icon-placeholder" />
                         )}
                     </div>
-                    <div className="location-row-main">
+                    <div
+                        className="location-row-main location-row-clickable"
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => openLocationInfo(location)}
+                        onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault()
+                                void openLocationInfo(location)
+                            }
+                        }}
+                    >
                         <div className="location-title">
                             <span className="location-name">
                                 {location.name}
@@ -1716,21 +1934,6 @@ export default function App() {
                                 aria-label="Добавить дочернюю локацию"
                             >
                                 +
-                            </button>
-                        )}
-                        {isAdmin && (
-                            <button
-                                className="ghost-button"
-                                type="button"
-                                onClick={() =>
-                                    handlePrintTask({
-                                        str1: location.name,
-                                        str2: getLocationPrintLine(location),
-                                        barcode: location.barcode,
-                                    })
-                                }
-                            >
-                                Печать
                             </button>
                         )}
                     </div>
@@ -2557,20 +2760,9 @@ export default function App() {
                                             <button
                                                 className="ghost-button"
                                                 type="button"
-                                                onClick={() =>
-                                                    setIsPublisherModalOpen(true)
-                                                }
+                                                onClick={openUserCreate}
                                             >
-                                                Добавить издательство
-                                            </button>
-                                            <button
-                                                className="ghost-button"
-                                                type="button"
-                                                onClick={() =>
-                                                    openAddLocation("building")
-                                                }
-                                            >
-                                                Добавить локацию
+                                                Добавить пользователя
                                             </button>
                                         </div>
                                     </>
@@ -2579,6 +2771,116 @@ export default function App() {
                         </div>
                     )}
                 </section>
+            )}
+
+            {isLocationInfoOpen && selectedLocation && (
+                <div className="modal-backdrop">
+                    <div className="modal modal-wide">
+                        <div className="modal-header">
+                            <div>
+                                <h3>{selectedLocation.name}</h3>
+                                <p className="item-meta">
+                                    {getLocationTypeLabel(selectedLocation.type)} ·{" "}
+                                    {selectedLocation.barcode}
+                                </p>
+                            </div>
+                            <button
+                                className="icon-button close-button"
+                                type="button"
+                                onClick={() => setIsLocationInfoOpen(false)}
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <div className="modal-body">
+                            {locationInfoLoading && (
+                                <p className="status-line">Загрузка...</p>
+                            )}
+                            {locationInfoError && (
+                                <p className="error-banner">{locationInfoError}</p>
+                            )}
+                            {!locationInfoLoading &&
+                                !locationInfoError &&
+                                (selectedLocation.type === "building" ||
+                                    selectedLocation.type === "room") && (
+                                <p className="status-line">
+                                    Список книг доступен только для шкафов и полок
+                                </p>
+                            )}
+                            {!locationInfoLoading &&
+                                !locationInfoError &&
+                                selectedLocation.type !== "building" &&
+                                selectedLocation.type !== "room" &&
+                                locationInfoGroups.length === 0 && (
+                                <p className="status-line">Книги не найдены</p>
+                            )}
+                            {!locationInfoLoading &&
+                                !locationInfoError &&
+                                selectedLocation.type !== "building" &&
+                                selectedLocation.type !== "room" &&
+                                locationInfoGroups.length > 0 && (
+                                <div className="location-book-groups">
+                                    {locationInfoGroups.map((group) => (
+                                        <div
+                                            key={group.location.id}
+                                            className="location-book-group"
+                                        >
+                                            <div className="location-book-group-header">
+                                                <h4>{group.location.name}</h4>
+                                                <span
+                                                    className={`location-type-badge type-${group.location.type}`}
+                                                >
+                                                    {getLocationTypeLabel(
+                                                        group.location.type
+                                                    )}
+                                                </span>
+                                            </div>
+                                            {group.books.length === 0 && (
+                                                <p className="status-line">
+                                                    Нет книг
+                                                </p>
+                                            )}
+                                            <div className="stack">
+                                                {group.books.map((book) => (
+                                                    <div
+                                                        key={book.id}
+                                                        className="mini-card"
+                                                    >
+                                                        <span>{book.title}</span>
+                                                        <span className="item-meta">
+                                                            {getBookAuthorsLine(
+                                                                book
+                                                            ) || "Без автора"}
+                                                        </span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                        {isAdmin && (
+                            <div className="modal-footer">
+                                <button
+                                    className="ghost-button"
+                                    type="button"
+                                    onClick={() =>
+                                        handlePrintTask({
+                                            str1: selectedLocation.name,
+                                            str2: getLocationPrintLine(
+                                                selectedLocation
+                                            ),
+                                            barcode: selectedLocation.barcode,
+                                        })
+                                    }
+                                >
+                                    Печать
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </div>
             )}
 
             {isLoginOpen && (
@@ -2633,6 +2935,169 @@ export default function App() {
                                 </button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {isUserCreateOpen && (
+                <div className="modal-backdrop">
+                    <div className="modal modal-wide">
+                        <div className="modal-header">
+                            <h3>Добавить пользователя</h3>
+                            <button
+                                className="icon-button close-button"
+                                type="button"
+                                onClick={closeUserCreate}
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <div className="modal-body">
+                            <div className="form-grid">
+                                <label className="field-label">
+                                    Логин
+                                    <input
+                                        className="text-input"
+                                        value={userCreateDraft.login}
+                                        onChange={(event) =>
+                                            setUserCreateDraft((prev) => ({
+                                                ...prev,
+                                                login: event.target.value,
+                                            }))
+                                        }
+                                    />
+                                </label>
+                                <label className="field-label">
+                                    Имя
+                                    <input
+                                        className="text-input"
+                                        value={userCreateDraft.first_name}
+                                        onChange={(event) =>
+                                            setUserCreateDraft((prev) => ({
+                                                ...prev,
+                                                first_name: event.target.value,
+                                            }))
+                                        }
+                                    />
+                                </label>
+                                <label className="field-label">
+                                    Фамилия
+                                    <input
+                                        className="text-input"
+                                        value={userCreateDraft.last_name}
+                                        onChange={(event) =>
+                                            setUserCreateDraft((prev) => ({
+                                                ...prev,
+                                                last_name: event.target.value,
+                                            }))
+                                        }
+                                    />
+                                </label>
+                                <label className="field-label">
+                                    Отчество
+                                    <input
+                                        className="text-input"
+                                        value={userCreateDraft.middle_name}
+                                        onChange={(event) =>
+                                            setUserCreateDraft((prev) => ({
+                                                ...prev,
+                                                middle_name: event.target.value,
+                                            }))
+                                        }
+                                    />
+                                </label>
+                                <label className="field-label">
+                                    Email
+                                    <input
+                                        className="text-input"
+                                        value={userCreateDraft.email}
+                                        onChange={(event) =>
+                                            setUserCreateDraft((prev) => ({
+                                                ...prev,
+                                                email: event.target.value,
+                                            }))
+                                        }
+                                    />
+                                </label>
+                                <label className="field-label">
+                                    Пароль
+                                    <input
+                                        className="text-input"
+                                        type="password"
+                                        value={userCreateDraft.password}
+                                        onChange={(event) =>
+                                            setUserCreateDraft((prev) => ({
+                                                ...prev,
+                                                password: event.target.value,
+                                            }))
+                                        }
+                                    />
+                                </label>
+                            </div>
+                            <div className="role-picker">
+                                <h4>Роли</h4>
+                                <div className="role-list">
+                                    {ROLE_OPTIONS.map((role) => {
+                                        const isSelected =
+                                            userCreateDraft.roleCodes.includes(
+                                                role.code
+                                            )
+                                        return (
+                                            <label
+                                                key={role.code}
+                                                className="role-item"
+                                                title={`Права: ${role.permissions.join(
+                                                    ", "
+                                                )}`}
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isSelected}
+                                                    onChange={() =>
+                                                        setUserCreateDraft(
+                                                            (prev) => ({
+                                                                ...prev,
+                                                                roleCodes:
+                                                                    isSelected
+                                                                        ? prev.roleCodes.filter(
+                                                                              (
+                                                                                  code
+                                                                              ) =>
+                                                                                  code !==
+                                                                                  role.code
+                                                                          )
+                                                                        : [
+                                                                              ...prev.roleCodes,
+                                                                              role.code,
+                                                                          ],
+                                                            })
+                                                        )
+                                                    }
+                                                />
+                                                <span>{role.name}</span>
+                                            </label>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+                            {userCreateError && (
+                                <p className="error-banner">
+                                    {userCreateError}
+                                </p>
+                            )}
+                        </div>
+                        <div className="modal-footer">
+                            <button
+                                className="primary-button"
+                                type="button"
+                                onClick={handleCreateUser}
+                                disabled={userCreateSaving}
+                            >
+                                {userCreateSaving
+                                    ? "Сохранение..."
+                                    : "Добавить пользователя"}
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

@@ -1343,6 +1343,29 @@ select.text-input {
   gap: 8px;
 }
 
+.role-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.role-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.role-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(120, 96, 70, 0.2);
+  background: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+}
+
 .tag {
   padding: 6px 10px;
   border-radius: 999px;
@@ -1417,6 +1440,14 @@ select.text-input {
 .location-name {
   font-weight: 600;
   font-size: 1rem;
+}
+
+.location-row-clickable {
+  cursor: pointer;
+}
+
+.location-row-clickable:hover .location-name {
+  text-decoration: underline;
 }
 
 .location-type-badge {
@@ -1507,6 +1538,31 @@ select.text-input {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 10px;
+}
+
+.location-book-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.location-book-group {
+  border: 1px solid rgba(120, 96, 70, 0.2);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.location-book-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.location-book-group h4 {
+  margin: 0;
 }
 
 @media (max-width: 900px) {

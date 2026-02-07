@@ -533,7 +533,24 @@ func (r *BookRepository) getBooksBase(
 		            $1::uuid IS NULL
 					AND $2::text IS NULL
 		            AND $3::text IS NULL
-		            AND ($4::text IS NULL OR b.search_vector @@ plainto_tsquery('russian', $4))
+		            AND (
+		                $4::text IS NULL
+		                OR b.search_vector @@ plainto_tsquery('russian', $4)
+		                OR EXISTS (
+		                    WITH RECURSIVE loc_chain AS (
+		                        SELECT l.id, l.parent_id, l.barcode
+		                        FROM locations l
+		                        WHERE l.id = b.location_id
+		                        UNION ALL
+		                        SELECT p.id, p.parent_id, p.barcode
+		                        FROM locations p
+		                        JOIN loc_chain c ON c.parent_id = p.id
+		                    )
+		                    SELECT 1
+		                    FROM loc_chain
+		                    WHERE barcode = $4
+		                )
+		            )
 		        )
 		    )
 			AND ($5::uuid IS NULL OR b.publisher_id = $5)
