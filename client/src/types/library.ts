@@ -4,6 +4,16 @@ export type Role = {
     name: string
 }
 
+export type Permission = {
+    id: number
+    code: string
+    name: string
+}
+
+export type RoleWithPermissions = Role & {
+    permissions: Permission[]
+}
+
 export type User = {
     id: string
     login: string

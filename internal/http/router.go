@@ -61,6 +61,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	publisherRepo := postgres.NewPublisherRepository(db)
 	locationRepo := postgres.NewLocationRepository(db)
 	sequenceRepo := postgres.NewSequenceRepository(db)
+	roleRepo := postgres.NewRoleRepository(db)
 
 	imageStorage := local.NewImageStorage(cfg.ImagesPath, cfg.ImagesURL)
 
@@ -79,6 +80,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	publisherService := service.NewPublisherService(publisherRepo)
 	locationService := service.NewLocationService(locationRepo, barcodeService)
 	userService := service.NewUserService(userRepo)
+	roleService := service.NewRoleService(roleRepo)
 	imageService := service.NewImageService(imageStorage)
 	printQueue := service.NewPrintQueue(cfg.RabbitURL, cfg.RabbitQueue)
 
@@ -93,6 +95,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 	publisherHandler := handler.NewPublisherHandler(publisherService)
 	locationHandler := handler.NewLocationHandler(locationService)
 	userHandler := handler.NewUserHandler(userService)
+	roleHandler := handler.NewRoleHandler(roleService)
 	imageHandler := handler.NewImageHandler(imageService)
 	printHandler := handler.NewPrintHandler(printQueue)
 
@@ -148,10 +151,20 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) http.Handler {
 			r.Post("/print", printHandler.Send)
 
 			r.Route("/users", func(r chi.Router) {
+				r.Get("/", userHandler.GetAll)
 				r.Get("/{id}", userHandler.GetByID)
 				r.Post("/", userHandler.Create)
 				r.Put("/{id}", userHandler.Update)
 				r.Delete("/{id}", userHandler.Delete)
+			})
+
+			r.Route("/roles", func(r chi.Router) {
+				r.Get("/", roleHandler.GetAll)
+				r.Post("/", roleHandler.Create)
+			})
+
+			r.Route("/permissions", func(r chi.Router) {
+				r.Get("/", roleHandler.GetPermissions)
 			})
 
 			r.Route("/books", func(r chi.Router) {

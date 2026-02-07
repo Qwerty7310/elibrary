@@ -47,16 +47,22 @@ func (r *UserRepository) Create(ctx context.Context, user domain.User) error {
 		return err
 	}
 
-	roleIDs := make([]int, 0, len(user.Roles))
+	roleCodes := make([]string, 0, len(user.Roles))
 	for _, role := range user.Roles {
-		roleIDs = append(roleIDs, role.ID)
+		if role.Code != "" {
+			roleCodes = append(roleCodes, role.Code)
+		}
 	}
 
 	_, err = tx.Exec(ctx, `
 		INSERT INTO user_roles (user_id, role_id)
-		SELECT $1, r
-		FROM UNNEST($2::int[]) AS r
-	`, user.ID, roleIDs)
+		SELECT $1, r.id
+		FROM roles r
+		WHERE r.code = ANY($2::text[])
+	`, user.ID, roleCodes)
+	if err != nil {
+		return err
+	}
 
 	return tx.Commit(ctx)
 }
@@ -108,16 +114,19 @@ func (r *UserRepository) Update(ctx context.Context, user domain.User) error {
 		return err
 	}
 
-	roleIDs := make([]int, 0, len(user.Roles))
+	roleCodes := make([]string, 0, len(user.Roles))
 	for _, role := range user.Roles {
-		roleIDs = append(roleIDs, role.ID)
+		if role.Code != "" {
+			roleCodes = append(roleCodes, role.Code)
+		}
 	}
 
 	_, err = tx.Exec(ctx, `
 		INSERT INTO user_roles (user_id, role_id)
-		SELECT $1, r
-		FROM UNNEST($2::int[]) AS r
-	`, user.ID, roleIDs)
+		SELECT $1, r.id
+		FROM roles r
+		WHERE r.code = ANY($2::text[])
+	`, user.ID, roleCodes)
 	if err != nil {
 		return err
 	}
@@ -278,4 +287,82 @@ func (r *UserRepository) GetByIDWithRoles(ctx context.Context, id uuid.UUID) (*d
 	}
 
 	return user, nil
+}
+
+func (r *UserRepository) GetAllWithRoles(ctx context.Context) ([]*domain.User, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT
+			u.id, u.login, u.first_name, u.last_name, u.middle_name, u.email,
+			u.password_hash, u.is_active, u.created_at, u.updated_at,
+			r.id, r.code, r.name
+		FROM users u
+		LEFT JOIN user_roles ur ON ur.user_id = u.id
+		LEFT JOIN roles r ON r.id = ur.role_id
+		ORDER BY u.login, r.code
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	usersByID := make(map[uuid.UUID]*domain.User)
+	orderedIDs := make([]uuid.UUID, 0)
+
+	for rows.Next() {
+		var (
+			roleID   *int
+			roleCode *string
+			roleName *string
+
+			u domain.User
+		)
+		err := rows.Scan(
+			&u.ID,
+			&u.Login,
+			&u.FirstName,
+			&u.LastName,
+			&u.MiddleName,
+			&u.Email,
+			&u.PasswordHash,
+			&u.IsActive,
+			&u.CreatedAt,
+			&u.UpdatedAt,
+			&roleID,
+			&roleCode,
+			&roleName,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		existing, ok := usersByID[u.ID]
+		if !ok {
+			existing = &u
+			usersByID[u.ID] = existing
+			orderedIDs = append(orderedIDs, u.ID)
+		}
+
+		if roleID != nil && roleCode != nil && roleName != nil {
+			existing.Roles = append(existing.Roles, domain.Role{
+				ID:   *roleID,
+				Code: *roleCode,
+				Name: *roleName,
+			})
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if len(orderedIDs) == 0 {
+		return nil, repository.ErrNotFound
+	}
+
+	result := make([]*domain.User, 0, len(orderedIDs))
+	for _, id := range orderedIDs {
+		result = append(result, usersByID[id])
+	}
+
+	return result, nil
 }

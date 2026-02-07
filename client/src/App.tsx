@@ -28,8 +28,9 @@ import {
     getPublishersReference,
     getWorksReference,
 } from "./api/reference"
+import {createRole, getPermissions, getRoles} from "./api/roles"
 import {API_URL, ApiError, setToken} from "./api/http"
-import {createUser, getUserByID, updateUser} from "./api/users"
+import {createUser, deleteUser, getUserByID, getUsers, updateUser} from "./api/users"
 import {SafeImage} from "./components/SafeImage"
 import {uploadImage} from "./api/images"
 import type {
@@ -39,7 +40,9 @@ import type {
     BookPublic,
     BookWorkInput,
     LocationEntity,
+    Permission,
     Publisher,
+    RoleWithPermissions,
     User,
     WorkDetailed,
     WorkShort,
@@ -102,45 +105,6 @@ type PrintQueueItem = {
     authors: string
     barcode: string
 }
-
-type RoleOption = {
-    id: number
-    code: string
-    name: string
-    permissions: string[]
-}
-
-const ROLE_OPTIONS: RoleOption[] = [
-    {
-        id: 1,
-        code: "admin",
-        name: "Администратор",
-        permissions: [
-            "Просмотр детальной информации о книге",
-            "Просмотр локаций",
-            "Добавление книг",
-            "Редактирование книг",
-            "Удаление книг",
-        ],
-    },
-    {
-        id: 2,
-        code: "librarian",
-        name: "Библиотекарь",
-        permissions: [
-            "Просмотр детальной информации о книге",
-            "Просмотр локаций",
-            "Добавление книг",
-            "Редактирование книг",
-        ],
-    },
-    {
-        id: 3,
-        code: "reader",
-        name: "Читатель",
-        permissions: ["Просмотр детальной информации о книге"],
-    },
-]
 
 const emptyBookDraft: BookDraft = {
     title: "",
@@ -251,6 +215,29 @@ function getBookAuthorsLine(book: BookPublic) {
             )
         )
     ).join(", ")
+}
+
+function getBookAuthorNames(book: BookPublic) {
+    if (!book.works?.length) {
+        return []
+    }
+    return Array.from(
+        new Set(
+            book.works.flatMap((work) =>
+                (work.authors ?? []).map((author) => getAuthorName(author))
+            )
+        )
+    ).filter((name) => name.trim().length > 0)
+}
+
+function getBookAuthorsPreview(book: BookPublic, limit = 3) {
+    const all = getBookAuthorNames(book)
+    const shown = all.slice(0, limit)
+    return {
+        shownLine: shown.join(", "),
+        hiddenCount: Math.max(0, all.length - shown.length),
+        all,
+    }
 }
 
 function getLocationPrintLine(location: LocationEntity) {
@@ -400,6 +387,8 @@ export default function App() {
     const [printQueueSending, setPrintQueueSending] = useState(false)
     const [selectedBook, setSelectedBook] = useState<BookPublic | null>(null)
     const [isBookInfoOpen, setIsBookInfoOpen] = useState(false)
+    const [isBookAuthorsPopupOpen, setIsBookAuthorsPopupOpen] = useState(false)
+    const [bookAuthorsPopupList, setBookAuthorsPopupList] = useState<string[]>([])
     const [editingBookId, setEditingBookId] = useState<string | null>(null)
 
     const [workQuery, setWorkQuery] = useState("")
@@ -530,6 +519,36 @@ export default function App() {
     })
     const [userCreateSaving, setUserCreateSaving] = useState(false)
     const [userCreateError, setUserCreateError] = useState<string | null>(null)
+    const [roleOptions, setRoleOptions] = useState<RoleWithPermissions[]>([])
+    const [permissionOptions, setPermissionOptions] = useState<Permission[]>([])
+    const [isRoleManageOpen, setIsRoleManageOpen] = useState(false)
+    const [roleCreateDraft, setRoleCreateDraft] = useState({
+        code: "",
+        name: "",
+        permissionCodes: [] as string[],
+    })
+    const [roleCreateSaving, setRoleCreateSaving] = useState(false)
+    const [roleCreateError, setRoleCreateError] = useState<string | null>(null)
+    const [isUserListOpen, setIsUserListOpen] = useState(false)
+    const [usersListLoading, setUsersListLoading] = useState(false)
+    const [usersListError, setUsersListError] = useState<string | null>(null)
+    const [usersList, setUsersList] = useState<User[]>([])
+    const [selectedManageUser, setSelectedManageUser] = useState<User | null>(null)
+    const [isUserInfoOpen, setIsUserInfoOpen] = useState(false)
+    const [isUserEditOpen, setIsUserEditOpen] = useState(false)
+    const [userEditSaving, setUserEditSaving] = useState(false)
+    const [userEditError, setUserEditError] = useState<string | null>(null)
+    const [userDeleteSaving, setUserDeleteSaving] = useState(false)
+    const [userEditDraft, setUserEditDraft] = useState({
+        login: "",
+        first_name: "",
+        last_name: "",
+        middle_name: "",
+        email: "",
+        password: "",
+        is_active: true,
+        roleCodes: [] as string[],
+    })
 
     useEffect(() => {
         if (!token) {
@@ -612,6 +631,24 @@ export default function App() {
             }
         })()
     }, [token])
+
+    useEffect(() => {
+        if (!token || !isAdmin) {
+            return
+        }
+        ;(async () => {
+            try {
+                const [rolesData, permissionsData] = await Promise.all([
+                    getRoles(),
+                    getPermissions(),
+                ])
+                setRoleOptions(rolesData ?? [])
+                setPermissionOptions(permissionsData ?? [])
+            } catch {
+                setAuthError("Не удалось загрузить роли и права")
+            }
+        })()
+    }, [token, isAdmin])
 
     useEffect(() => {
         if (
@@ -1601,6 +1638,12 @@ export default function App() {
         setIsPrintQueueOpen(true)
     }
 
+    function openBookAuthorsPopup(book: BookPublic) {
+        const authors = getBookAuthorNames(book)
+        setBookAuthorsPopupList(authors)
+        setIsBookAuthorsPopupOpen(true)
+    }
+
     async function sendPrintQueue() {
         if (printQueue.length === 0) {
             setPrintError("Очередь печати пуста")
@@ -1745,7 +1788,7 @@ export default function App() {
         setUserCreateSaving(true)
         setUserCreateError(null)
         try {
-            const roles = ROLE_OPTIONS.filter((role) =>
+            const roles = roleOptions.filter((role) =>
                 userCreateDraft.roleCodes.includes(role.code)
             ).map((role) => ({
                 id: role.id,
@@ -1770,6 +1813,211 @@ export default function App() {
             }
         } finally {
             setUserCreateSaving(false)
+        }
+    }
+
+    async function openUsersList() {
+        setIsUserListOpen(true)
+        setUsersListLoading(true)
+        setUsersListError(null)
+        try {
+            const data = await getUsers()
+            setUsersList(data ?? [])
+        } catch (err) {
+            if (err instanceof ApiError) {
+                setUsersListError(err.message)
+            } else {
+                setUsersListError("Не удалось загрузить список пользователей")
+            }
+        } finally {
+            setUsersListLoading(false)
+        }
+    }
+
+    async function openRoleManage() {
+        setIsRoleManageOpen(true)
+        setRoleCreateError(null)
+        setRoleCreateDraft({
+            code: "",
+            name: "",
+            permissionCodes: [],
+        })
+        try {
+            const [rolesData, permissionsData] = await Promise.all([
+                getRoles(),
+                getPermissions(),
+            ])
+            setRoleOptions(rolesData ?? [])
+            setPermissionOptions(permissionsData ?? [])
+        } catch (err) {
+            if (err instanceof ApiError) {
+                setRoleCreateError(err.message)
+            } else {
+                setRoleCreateError("Не удалось загрузить роли")
+            }
+        }
+    }
+
+    async function handleCreateRole() {
+        if (!roleCreateDraft.code.trim() || !roleCreateDraft.name.trim()) {
+            setRoleCreateError("Код и название роли обязательны")
+            return
+        }
+        setRoleCreateSaving(true)
+        setRoleCreateError(null)
+        try {
+            await createRole({
+                code: roleCreateDraft.code.trim(),
+                name: roleCreateDraft.name.trim(),
+                permission_codes: roleCreateDraft.permissionCodes,
+            })
+            const rolesData = await getRoles()
+            setRoleOptions(rolesData ?? [])
+            setRoleCreateDraft({
+                code: "",
+                name: "",
+                permissionCodes: [],
+            })
+        } catch (err) {
+            if (err instanceof ApiError) {
+                setRoleCreateError(err.message)
+            } else {
+                setRoleCreateError("Не удалось создать роль")
+            }
+        } finally {
+            setRoleCreateSaving(false)
+        }
+    }
+
+    function openUserInfo(userToShow: User) {
+        setSelectedManageUser(userToShow)
+        setIsUserInfoOpen(true)
+    }
+
+    function openUserEdit(userToEdit: User) {
+        setSelectedManageUser(userToEdit)
+        setUserEditDraft({
+            login: userToEdit.login ?? "",
+            first_name: userToEdit.first_name ?? "",
+            last_name: userToEdit.last_name ?? "",
+            middle_name: userToEdit.middle_name ?? "",
+            email: userToEdit.email ?? "",
+            password: "",
+            is_active: userToEdit.is_active,
+            roleCodes: (userToEdit.roles ?? []).map((role) => role.code),
+        })
+        setUserEditError(null)
+        setIsUserEditOpen(true)
+        setIsUserInfoOpen(false)
+    }
+
+    async function handleUserEditSave() {
+        if (!selectedManageUser) {
+            return
+        }
+        if (!userEditDraft.login.trim()) {
+            setUserEditError("Логин обязателен")
+            return
+        }
+        if (!userEditDraft.first_name.trim()) {
+            setUserEditError("Имя обязательно")
+            return
+        }
+        if (userEditDraft.roleCodes.length === 0) {
+            setUserEditError("Выберите хотя бы одну роль")
+            return
+        }
+        setUserEditSaving(true)
+        setUserEditError(null)
+        try {
+            const roles = roleOptions.filter((role) =>
+                userEditDraft.roleCodes.includes(role.code)
+            ).map((role) => ({
+                id: role.id,
+                code: role.code,
+                name: role.name,
+            }))
+            const payload: Record<string, unknown> = {
+                login: userEditDraft.login.trim(),
+                first_name: userEditDraft.first_name.trim(),
+                last_name: userEditDraft.last_name.trim() || undefined,
+                middle_name: userEditDraft.middle_name.trim() || undefined,
+                email: userEditDraft.email.trim() || undefined,
+                is_active: userEditDraft.is_active,
+                roles,
+            }
+            if (userEditDraft.password.trim()) {
+                payload.password = userEditDraft.password
+            }
+            await updateUser(selectedManageUser.id, payload)
+            setUsersList((prev) =>
+                prev.map((item) =>
+                    item.id === selectedManageUser.id
+                        ? {
+                              ...item,
+                              login: userEditDraft.login.trim(),
+                              first_name: userEditDraft.first_name.trim(),
+                              last_name: userEditDraft.last_name.trim() || undefined,
+                              middle_name:
+                                  userEditDraft.middle_name.trim() || undefined,
+                              email: userEditDraft.email.trim() || undefined,
+                              is_active: userEditDraft.is_active,
+                              roles,
+                          }
+                        : item
+                )
+            )
+            setSelectedManageUser((prev) =>
+                prev
+                    ? {
+                          ...prev,
+                          login: userEditDraft.login.trim(),
+                          first_name: userEditDraft.first_name.trim(),
+                          last_name: userEditDraft.last_name.trim() || undefined,
+                          middle_name:
+                              userEditDraft.middle_name.trim() || undefined,
+                          email: userEditDraft.email.trim() || undefined,
+                          is_active: userEditDraft.is_active,
+                          roles,
+                      }
+                    : prev
+            )
+            setIsUserEditOpen(false)
+            setIsUserInfoOpen(true)
+        } catch (err) {
+            if (err instanceof ApiError) {
+                setUserEditError(err.message)
+            } else {
+                setUserEditError("Не удалось обновить пользователя")
+            }
+        } finally {
+            setUserEditSaving(false)
+        }
+    }
+
+    async function handleUserDelete() {
+        if (!selectedManageUser) {
+            return
+        }
+        if (!window.confirm("Удалить пользователя?")) {
+            return
+        }
+        setUserDeleteSaving(true)
+        try {
+            await deleteUser(selectedManageUser.id)
+            setUsersList((prev) =>
+                prev.filter((item) => item.id !== selectedManageUser.id)
+            )
+            setIsUserInfoOpen(false)
+            setSelectedManageUser(null)
+        } catch (err) {
+            if (err instanceof ApiError) {
+                setUsersListError(err.message)
+            } else {
+                setUsersListError("Не удалось удалить пользователя")
+            }
+        } finally {
+            setUserDeleteSaving(false)
         }
     }
 
@@ -2179,9 +2427,11 @@ export default function App() {
                                                 <div className="print-queue-title">
                                                     {item.title}
                                                 </div>
-                                                <div className="item-meta">
-                                                    {item.authors || "—"}
-                                                </div>
+                                                {item.authors && (
+                                                    <div className="item-meta">
+                                                        {item.authors}
+                                                    </div>
+                                                )}
                                                 <div className="item-meta">
                                                     {item.barcode}
                                                 </div>
@@ -2374,28 +2624,30 @@ export default function App() {
                                     <div className="book-card-content">
                                         <h3>{book.title}</h3>
                                         <div className="book-card-meta">
-                                            <p>
-                                                {book.works?.length
-                                                    ? Array.from(
-                                                          new Set(
-                                                              book.works.flatMap(
-                                                                  (work) =>
-                                                                      (work.authors ??
-                                                                          []
-                                                                      ).map((author) =>
-                                                                          getAuthorName(
-                                                                              author
-                                                                          )
-                                                                      )
-                                                              )
-                                                          )
-                                                      ).join(", ")
-                                                    : "—"}
-                                            </p>
-                                            <p className="item-meta">
-                                                {book.publisher?.name ||
-                                                    "Без издательства"}
-                                            </p>
+                                            {(() => {
+                                                const preview =
+                                                    getBookAuthorsPreview(book)
+                                                if (!preview.shownLine) {
+                                                    return null
+                                                }
+                                                return (
+                                                    <p>
+                                                        {preview.shownLine}
+                                                        {preview.hiddenCount > 0 && (
+                                                            <span className="authors-more-muted">
+                                                                {" "}
+                                                                и еще{" "}
+                                                                {preview.hiddenCount}
+                                                            </span>
+                                                        )}
+                                                    </p>
+                                                )
+                                            })()}
+                                            {book.publisher?.name && (
+                                                <p className="item-meta">
+                                                    {book.publisher.name}
+                                                </p>
+                                            )}
                                             {book.year && <p>{book.year}</p>}
                                         </div>
                                     </div>
@@ -2848,22 +3100,6 @@ export default function App() {
                                             disabled={!isAdmin}
                                         />
                                     </label>
-                                {!isAdmin && (
-                                    <label className="field-label">
-                                        <span>Активен</span>
-                                        <input
-                                            type="checkbox"
-                                            checked={profileDraft.is_active}
-                                            onChange={(event) =>
-                                                setProfileDraft((prev) => ({
-                                                    ...prev,
-                                                    is_active:
-                                                        event.target.checked,
-                                                }))
-                                            }
-                                        />
-                                    </label>
-                                )}
                             </div>
                             {profileError && (
                                 <p className="error-banner">
@@ -2912,6 +3148,20 @@ export default function App() {
                                                 onClick={openUserCreate}
                                             >
                                                 Добавить пользователя
+                                            </button>
+                                            <button
+                                                className="ghost-button"
+                                                type="button"
+                                                onClick={openUsersList}
+                                            >
+                                                Список пользователей
+                                            </button>
+                                            <button
+                                                className="ghost-button"
+                                                type="button"
+                                                onClick={openRoleManage}
+                                            >
+                                                Управление ролями
                                             </button>
                                         </div>
                                     </>
@@ -2996,11 +3246,13 @@ export default function App() {
                                                         className="mini-card"
                                                     >
                                                         <span>{book.title}</span>
-                                                        <span className="item-meta">
-                                                            {getBookAuthorsLine(
-                                                                book
-                                                            ) || "Без автора"}
-                                                        </span>
+                                                        {getBookAuthorsLine(book) && (
+                                                            <span className="item-meta">
+                                                                {getBookAuthorsLine(
+                                                                    book
+                                                                )}
+                                                            </span>
+                                                        )}
                                                     </div>
                                                 ))}
                                             </div>
@@ -3259,7 +3511,7 @@ export default function App() {
                             <div className="role-picker">
                                 <h4>Роли</h4>
                                 <div className="role-list">
-                                    {ROLE_OPTIONS.map((role) => {
+                                    {roleOptions.map((role) => {
                                         const isSelected =
                                             userCreateDraft.roleCodes.includes(
                                                 role.code
@@ -3268,9 +3520,11 @@ export default function App() {
                                             <label
                                                 key={role.code}
                                                 className="role-item"
-                                                title={`Права: ${role.permissions.join(
-                                                    ", "
-                                                )}`}
+                                                title={`Права: ${
+                                                    role.permissions
+                                                        .map((permission) => permission.name)
+                                                        .join(", ") || "нет прав"
+                                                }`}
                                             >
                                                 <input
                                                     type="checkbox"
@@ -3318,6 +3572,443 @@ export default function App() {
                                 {userCreateSaving
                                     ? "Сохранение..."
                                     : "Добавить пользователя"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isUserListOpen && (
+                <div className="modal-backdrop">
+                    <div className="modal modal-wide">
+                        <div className="modal-header">
+                            <h3>Пользователи</h3>
+                            <button
+                                className="icon-button close-button"
+                                type="button"
+                                onClick={() => setIsUserListOpen(false)}
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <div className="modal-body">
+                            {usersListError && (
+                                <p className="error-banner">{usersListError}</p>
+                            )}
+                            {usersListLoading && (
+                                <p className="status-line">Загрузка...</p>
+                            )}
+                            {!usersListLoading && usersList.length === 0 && (
+                                <p className="status-line">Нет данных</p>
+                            )}
+                            <div className="list">
+                                {usersList.map((listUser) => (
+                                    <button
+                                        key={listUser.id}
+                                        className="list-item list-item-selectable"
+                                        type="button"
+                                        onClick={() => openUserInfo(listUser)}
+                                    >
+                                        <span>{listUser.login}</span>
+                                        <span className="item-meta">
+                                            {[
+                                                listUser.first_name,
+                                                listUser.last_name,
+                                                listUser.middle_name,
+                                            ]
+                                                .filter(Boolean)
+                                                .join(" ")}
+                                        </span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isUserInfoOpen && selectedManageUser && (
+                <div className="modal-backdrop modal-backdrop-top">
+                    <div className="modal">
+                        <div className="modal-header">
+                            <h3>{selectedManageUser.login}</h3>
+                            <button
+                                className="icon-button close-button"
+                                type="button"
+                                onClick={() => setIsUserInfoOpen(false)}
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <div className="modal-body">
+                            <p>
+                                <strong>Имя:</strong> {selectedManageUser.first_name}
+                            </p>
+                            {selectedManageUser.last_name && (
+                                <p>
+                                    <strong>Фамилия:</strong>{" "}
+                                    {selectedManageUser.last_name}
+                                </p>
+                            )}
+                            {selectedManageUser.middle_name && (
+                                <p>
+                                    <strong>Отчество:</strong>{" "}
+                                    {selectedManageUser.middle_name}
+                                </p>
+                            )}
+                            {selectedManageUser.email && (
+                                <p>
+                                    <strong>Email:</strong> {selectedManageUser.email}
+                                </p>
+                            )}
+                            <div>
+                                <strong>Роли:</strong>
+                                <div className="tag-list">
+                                    {(selectedManageUser.roles ?? []).map((role) => (
+                                        <span key={role.code} className="tag">
+                                            {role.name}
+                                        </span>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                        <div className="modal-footer">
+                            <button
+                                className="ghost-button"
+                                type="button"
+                                onClick={() => openUserEdit(selectedManageUser)}
+                                disabled={userDeleteSaving}
+                            >
+                                Изменить
+                            </button>
+                            <button
+                                className="ghost-button"
+                                type="button"
+                                onClick={handleUserDelete}
+                                disabled={userDeleteSaving}
+                            >
+                                {userDeleteSaving ? "Удаление..." : "Удалить"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isUserEditOpen && selectedManageUser && (
+                <div className="modal-backdrop modal-backdrop-top">
+                    <div className="modal modal-wide">
+                        <div className="modal-header">
+                            <h3>Изменить пользователя</h3>
+                            <button
+                                className="icon-button close-button"
+                                type="button"
+                                onClick={() => setIsUserEditOpen(false)}
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <div className="modal-body">
+                            <div className="form-grid">
+                                <label className="field-label">
+                                    Логин
+                                    <input
+                                        className="text-input"
+                                        value={userEditDraft.login}
+                                        onChange={(event) =>
+                                            setUserEditDraft((prev) => ({
+                                                ...prev,
+                                                login: event.target.value,
+                                            }))
+                                        }
+                                    />
+                                </label>
+                                <label className="field-label">
+                                    Имя
+                                    <input
+                                        className="text-input"
+                                        value={userEditDraft.first_name}
+                                        onChange={(event) =>
+                                            setUserEditDraft((prev) => ({
+                                                ...prev,
+                                                first_name: event.target.value,
+                                            }))
+                                        }
+                                    />
+                                </label>
+                                <label className="field-label">
+                                    Фамилия
+                                    <input
+                                        className="text-input"
+                                        value={userEditDraft.last_name}
+                                        onChange={(event) =>
+                                            setUserEditDraft((prev) => ({
+                                                ...prev,
+                                                last_name: event.target.value,
+                                            }))
+                                        }
+                                    />
+                                </label>
+                                <label className="field-label">
+                                    Отчество
+                                    <input
+                                        className="text-input"
+                                        value={userEditDraft.middle_name}
+                                        onChange={(event) =>
+                                            setUserEditDraft((prev) => ({
+                                                ...prev,
+                                                middle_name: event.target.value,
+                                            }))
+                                        }
+                                    />
+                                </label>
+                                <label className="field-label">
+                                    Email
+                                    <input
+                                        className="text-input"
+                                        value={userEditDraft.email}
+                                        onChange={(event) =>
+                                            setUserEditDraft((prev) => ({
+                                                ...prev,
+                                                email: event.target.value,
+                                            }))
+                                        }
+                                    />
+                                </label>
+                                <label className="field-label">
+                                    Новый пароль
+                                    <input
+                                        className="text-input"
+                                        type="password"
+                                        value={userEditDraft.password}
+                                        onChange={(event) =>
+                                            setUserEditDraft((prev) => ({
+                                                ...prev,
+                                                password: event.target.value,
+                                            }))
+                                        }
+                                    />
+                                </label>
+                                <label className="field-label checkbox">
+                                    <span>Активен</span>
+                                    <input
+                                        type="checkbox"
+                                        checked={userEditDraft.is_active}
+                                        onChange={(event) =>
+                                            setUserEditDraft((prev) => ({
+                                                ...prev,
+                                                is_active: event.target.checked,
+                                            }))
+                                        }
+                                    />
+                                </label>
+                            </div>
+                            <div className="role-picker">
+                                <h4>Роли</h4>
+                                <div className="role-list">
+                                    {roleOptions.map((role) => {
+                                        const isSelected =
+                                            userEditDraft.roleCodes.includes(
+                                                role.code
+                                            )
+                                        return (
+                                            <label
+                                                key={role.code}
+                                                className="role-item"
+                                                title={`Права: ${
+                                                    role.permissions
+                                                        .map((permission) => permission.name)
+                                                        .join(", ") || "нет прав"
+                                                }`}
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isSelected}
+                                                    onChange={() =>
+                                                        setUserEditDraft(
+                                                            (prev) => ({
+                                                                ...prev,
+                                                                roleCodes:
+                                                                    isSelected
+                                                                        ? prev.roleCodes.filter(
+                                                                              (
+                                                                                  code
+                                                                              ) =>
+                                                                                  code !==
+                                                                                  role.code
+                                                                          )
+                                                                        : [
+                                                                              ...prev.roleCodes,
+                                                                              role.code,
+                                                                          ],
+                                                            })
+                                                        )
+                                                    }
+                                                />
+                                                <span>{role.name}</span>
+                                            </label>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+                            {userEditError && (
+                                <p className="error-banner">{userEditError}</p>
+                            )}
+                        </div>
+                        <div className="modal-footer">
+                            <button
+                                className="primary-button"
+                                type="button"
+                                onClick={handleUserEditSave}
+                                disabled={userEditSaving}
+                            >
+                                {userEditSaving ? "Сохранение..." : "Сохранить"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isRoleManageOpen && (
+                <div className="modal-backdrop modal-backdrop-top">
+                    <div className="modal modal-wide">
+                        <div className="modal-header">
+                            <h3>Управление ролями</h3>
+                            <button
+                                className="icon-button close-button"
+                                type="button"
+                                onClick={() => setIsRoleManageOpen(false)}
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <div className="modal-body">
+                            <div>
+                                <h4>Текущие роли</h4>
+                                {roleOptions.length === 0 ? (
+                                    <p className="status-line">Роли не найдены</p>
+                                ) : (
+                                    <div className="stack">
+                                        {roleOptions.map((role) => (
+                                            <div key={role.code} className="mini-card">
+                                                <strong>{role.name}</strong>
+                                                <span className="item-meta">
+                                                    Код: {role.code}
+                                                </span>
+                                                <div className="tag-list">
+                                                    {(role.permissions ?? []).length > 0 ? (
+                                                        role.permissions.map((permission) => (
+                                                            <span
+                                                                key={`${role.code}-${permission.code}`}
+                                                                className="tag"
+                                                            >
+                                                                {permission.name}
+                                                            </span>
+                                                        ))
+                                                    ) : (
+                                                        <span className="status-line">
+                                                            Нет прав
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                            <div className="role-create-section">
+                                <h4>Добавить роль</h4>
+                                <div className="form-grid">
+                                    <label className="field-label">
+                                        Код роли
+                                        <input
+                                            className="text-input"
+                                            value={roleCreateDraft.code}
+                                            onChange={(event) =>
+                                                setRoleCreateDraft((prev) => ({
+                                                    ...prev,
+                                                    code: event.target.value,
+                                                }))
+                                            }
+                                            placeholder="manager"
+                                        />
+                                    </label>
+                                    <label className="field-label">
+                                        Название роли
+                                        <input
+                                            className="text-input"
+                                            value={roleCreateDraft.name}
+                                            onChange={(event) =>
+                                                setRoleCreateDraft((prev) => ({
+                                                    ...prev,
+                                                    name: event.target.value,
+                                                }))
+                                            }
+                                            placeholder="Менеджер"
+                                        />
+                                    </label>
+                                </div>
+                                <div className="role-picker">
+                                    <h4>Права</h4>
+                                    {permissionOptions.length === 0 ? (
+                                        <p className="status-line">
+                                            Нет доступных прав
+                                        </p>
+                                    ) : (
+                                        <div className="role-list">
+                                            {permissionOptions.map((permission) => {
+                                                const isSelected =
+                                                    roleCreateDraft.permissionCodes.includes(
+                                                        permission.code
+                                                    )
+                                                return (
+                                                    <label
+                                                        key={permission.code}
+                                                        className="role-item"
+                                                    >
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={isSelected}
+                                                            onChange={() =>
+                                                                setRoleCreateDraft(
+                                                                    (prev) => ({
+                                                                        ...prev,
+                                                                        permissionCodes:
+                                                                            isSelected
+                                                                                ? prev.permissionCodes.filter(
+                                                                                      (
+                                                                                          code
+                                                                                      ) =>
+                                                                                          code !==
+                                                                                          permission.code
+                                                                                  )
+                                                                                : [
+                                                                                      ...prev.permissionCodes,
+                                                                                      permission.code,
+                                                                                  ],
+                                                                    })
+                                                                )
+                                                            }
+                                                        />
+                                                        <span>{permission.name}</span>
+                                                    </label>
+                                                )
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            {roleCreateError && (
+                                <p className="error-banner">{roleCreateError}</p>
+                            )}
+                        </div>
+                        <div className="modal-footer">
+                            <button
+                                className="primary-button"
+                                type="button"
+                                onClick={handleCreateRole}
+                                disabled={roleCreateSaving}
+                            >
+                                {roleCreateSaving ? "Сохранение..." : "Добавить роль"}
                             </button>
                         </div>
                     </div>
@@ -3894,24 +4585,32 @@ export default function App() {
                                 <div className="book-info-header-text">
                                     <h3>{selectedBook.title}</h3>
                                     <div className="book-info-header-meta">
-                                        <p>
-                                            {selectedBook.works?.length
-                                                ? Array.from(
-                                                      new Set(
-                                                          selectedBook.works.flatMap(
-                                                              (work) =>
-                                                                  (work.authors ??
-                                                                      []
-                                                                  ).map((author) =>
-                                                                      getAuthorName(
-                                                                          author
-                                                                      )
-                                                                  )
-                                                          )
-                                                      )
-                                                  ).join(", ")
-                                                : "—"}
-                                        </p>
+                                        {(() => {
+                                            const preview =
+                                                getBookAuthorsPreview(selectedBook)
+                                            if (!preview.shownLine) {
+                                                return null
+                                            }
+                                            return (
+                                                <p>
+                                                    {preview.shownLine}
+                                                    {preview.hiddenCount > 0 && (
+                                                        <button
+                                                            className="authors-more-link"
+                                                            type="button"
+                                                            onClick={() =>
+                                                                openBookAuthorsPopup(
+                                                                    selectedBook
+                                                                )
+                                                            }
+                                                        >
+                                                            и еще{" "}
+                                                            {preview.hiddenCount}
+                                                        </button>
+                                                    )}
+                                                </p>
+                                            )
+                                        })()}
                                         {selectedBook.publisher?.name && (
                                             <p className="item-meta">
                                                 {selectedBook.publisher.name}
@@ -3928,7 +4627,10 @@ export default function App() {
                             <button
                                 className="icon-button close-button"
                                 type="button"
-                                onClick={() => setIsBookInfoOpen(false)}
+                                onClick={() => {
+                                    setIsBookInfoOpen(false)
+                                    setIsBookAuthorsPopupOpen(false)
+                                }}
                             >
                                 ✕
                             </button>
@@ -4896,6 +5598,41 @@ export default function App() {
                                     ? "Сохранение..."
                                     : "Сохранить"}
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isBookAuthorsPopupOpen && (
+                <div
+                    className="modal-backdrop modal-backdrop-top"
+                    onClick={() => setIsBookAuthorsPopupOpen(false)}
+                >
+                    <div
+                        className="modal authors-popup-modal"
+                        onClick={(event) => event.stopPropagation()}
+                    >
+                        <div className="modal-header">
+                            <h3>Авторы</h3>
+                            <button
+                                className="icon-button close-button"
+                                type="button"
+                                onClick={() => setIsBookAuthorsPopupOpen(false)}
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <div className="modal-body">
+                            {bookAuthorsPopupList.length === 0 && (
+                                <p className="status-line">Нет данных</p>
+                            )}
+                            {bookAuthorsPopupList.length > 0 && (
+                                <div className="authors-popup-list">
+                                    {bookAuthorsPopupList.map((author) => (
+                                        <p key={author}>{author}</p>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>

@@ -238,6 +238,34 @@
   background: rgba(69, 54, 40, 0.08);
 }
 
+.authors-more-muted {
+  color: rgba(53, 41, 29, 0.6);
+}
+
+.authors-more-link {
+  margin-left: 8px;
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: rgba(53, 41, 29, 0.6);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.authors-popup-modal {
+  width: min(460px, 100%);
+}
+
+.authors-popup-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.authors-popup-list p {
+  margin: 0;
+}
+
 .highlight {
   background: rgba(244, 211, 120, 0.75);
   padding: 0 2px;
@@ -1347,6 +1375,14 @@ select.text-input {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.role-create-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(120, 96, 70, 0.2);
 }
 
 .role-list {

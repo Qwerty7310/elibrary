@@ -15,4 +15,5 @@ type UserRepository interface {
 	GetByLogin(ctx context.Context, login string) (*domain.User, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error)
 	GetByIDWithRoles(ctx context.Context, id uuid.UUID) (*domain.User, error)
+	GetAllWithRoles(ctx context.Context) ([]*domain.User, error)
 }

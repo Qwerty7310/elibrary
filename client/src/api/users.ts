@@ -5,6 +5,10 @@ export function getUserByID(id: string) {
     return requestJson<User>(`/admin/users/${encodeURIComponent(id)}`)
 }
 
+export function getUsers() {
+    return requestJson<User[]>("/admin/users")
+}
+
 export function createUser(payload: {
     login: string
     first_name: string
@@ -24,5 +28,11 @@ export function updateUser(id: string, payload: Partial<User> & {password?: stri
     return requestJson<void>(`/admin/users/${encodeURIComponent(id)}`, {
         method: "PUT",
         body: JSON.stringify(payload),
+    })
+}
+
+export function deleteUser(id: string) {
+    return requestJson<void>(`/admin/users/${encodeURIComponent(id)}`, {
+        method: "DELETE",
     })
 }

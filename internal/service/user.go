@@ -61,7 +61,7 @@ type UpdateUserRequest struct {
 }
 
 func (s *UserService) Update(ctx context.Context, id uuid.UUID, updates UpdateUserRequest) error {
-	user, err := s.userRepo.GetByID(ctx, id)
+	user, err := s.userRepo.GetByIDWithRoles(ctx, id)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return domain.ErrNotFound
@@ -141,4 +141,15 @@ func (s *UserService) GetByIDWithRoles(ctx context.Context, id uuid.UUID) (*doma
 		return nil, err
 	}
 	return user, nil
+}
+
+func (s *UserService) GetAllWithRoles(ctx context.Context) ([]*domain.User, error) {
+	users, err := s.userRepo.GetAllWithRoles(ctx)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, domain.ErrNotFound
+		}
+		return nil, err
+	}
+	return users, nil
 }

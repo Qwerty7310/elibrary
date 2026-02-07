@@ -164,3 +164,17 @@ func (h *UserHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, user)
 }
+
+func (h *UserHandler) GetAll(w http.ResponseWriter, r *http.Request) {
+	users, err := h.Service.GetAllWithRoles(r.Context())
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			writeJSON(w, http.StatusOK, []any{})
+			return
+		}
+		log.Printf("error getting users: %v", err)
+		http.Error(w, "error getting users", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, users)
+}
