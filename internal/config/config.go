@@ -1,6 +1,8 @@
 package config
 
 import (
+	"errors"
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -24,7 +26,7 @@ func Load() *Config {
 	cfg := &Config{
 		HTTPAddr:  getEnv("HTTP_ADDR", ":8080"),
 		DBURL:     os.Getenv("DB_URL"),
-		JWTSecret: getEnv("JWT_SECRET", "dev-secret"),
+		JWTSecret: os.Getenv("JWT_SECRET"),
 
 		CORSAllowedOrigins: parseCSVEnv(
 			"CORS_ALLOWED_ORIGINS",
@@ -34,12 +36,32 @@ func Load() *Config {
 		ImagesPath: getEnv("IMAGES_PATH", "./data/images"),
 		ImagesURL:  getEnv("IMAGES_URL", "/static/images"),
 
-		RabbitURL:   getEnv("RABBIT_URL", "amqp://printer_user:strong_pass@rabbitmq:5672/"),
+		RabbitURL:   os.Getenv("RABBIT_URL"),
 		RabbitQueue: getEnv("RABBIT_QUEUE", "print_queue"),
 	}
 
 	log.Println("config loaded:", cfg.HTTPAddr)
 	return cfg
+}
+
+func (c *Config) Validate() error {
+	var missing []string
+
+	if strings.TrimSpace(c.DBURL) == "" {
+		missing = append(missing, "DB_URL")
+	}
+	if strings.TrimSpace(c.JWTSecret) == "" {
+		missing = append(missing, "JWT_SECRET")
+	}
+	if strings.TrimSpace(c.RabbitURL) == "" {
+		missing = append(missing, "RABBIT_URL")
+	}
+
+	if len(missing) == 0 {
+		return nil
+	}
+
+	return fmt.Errorf("%w: %s", errors.New("missing required environment variables"), strings.Join(missing, ", "))
 }
 
 func getEnv(key, def string) string {

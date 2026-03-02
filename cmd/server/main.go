@@ -12,6 +12,9 @@ import (
 
 func main() {
 	cfg := config.Load()
+	if err := cfg.Validate(); err != nil {
+		log.Fatal(err)
+	}
 
 	db, err := pgxpool.New(context.Background(), cfg.DBURL)
 	if err != nil {

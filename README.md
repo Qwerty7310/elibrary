@@ -51,8 +51,12 @@ client                  frontend на React/Vite
 Основной способ поднять проект:
 
 ```bash
+cp .env.example .env
+# отредактируй .env и задай свои реальные значения
 docker compose up --build
 ```
+
+`docker compose` прочитает переменные из локального файла `.env`, поэтому секреты больше не хранятся в `docker-compose.yml`.
 
 Что поднимется:
 
@@ -79,13 +83,13 @@ docker network create web
 Пример:
 
 ```bash
-export DB_URL='postgres://elibrary:elibrary@localhost:5432/elibrary?sslmode=disable'
+export DB_URL='postgres://elibrary:NEW_DB_PASSWORD@localhost:5432/elibrary?sslmode=disable'
 export HTTP_ADDR=':8080'
-export JWT_SECRET='change-me'
+export JWT_SECRET='NEW_LONG_RANDOM_JWT_SECRET'
 export CORS_ALLOWED_ORIGINS='http://localhost:5173'
 export IMAGES_PATH='./data/images'
 export IMAGES_URL='/static/images'
-export RABBIT_URL='amqp://printer_user:strong_pass@localhost:5672/'
+export RABBIT_URL='amqp://printer_user:NEW_RABBIT_PASSWORD@localhost:5672/'
 export RABBIT_QUEUE='print_queue'
 
 go run ./cmd/server
@@ -100,13 +104,7 @@ make migrate-up
 make migrate-down
 ```
 
-По умолчанию используется:
-
-```bash
-postgres://elibrary:elibrary@localhost:5432/elibrary?sslmode=disable
-```
-
-Если нужен другой DSN:
+Теперь `DB_URL` нужно передавать явно:
 
 ```bash
 make migrate-up DB_URL='postgres://user:pass@localhost:5432/db?sslmode=disable'
@@ -118,6 +116,7 @@ make migrate-up DB_URL='postgres://user:pass@localhost:5432/db?sslmode=disable'
 
 - `DB_URL` — строка подключения к PostgreSQL
 - `JWT_SECRET` — секрет для подписи JWT
+- `RABBIT_URL` — адрес RabbitMQ с актуальными учетными данными
 
 Поддерживаемые настройки:
 
@@ -125,8 +124,9 @@ make migrate-up DB_URL='postgres://user:pass@localhost:5432/db?sslmode=disable'
 - `CORS_ALLOWED_ORIGINS` — список origin через запятую, по умолчанию `http://localhost:5173,http://localhost:3000`
 - `IMAGES_PATH` — локальный путь для хранения изображений, по умолчанию `./data/images`
 - `IMAGES_URL` — URL-префикс для раздачи изображений, по умолчанию `/static/images`
-- `RABBIT_URL` — адрес RabbitMQ, по умолчанию `amqp://printer_user:strong_pass@rabbitmq:5672/`
 - `RABBIT_QUEUE` — имя очереди печати, по умолчанию `print_queue`
+
+Если не задать `DB_URL`, `JWT_SECRET` или `RABBIT_URL`, backend завершится на старте с явной ошибкой.
 
 ## Локальный запуск frontend
 
@@ -242,6 +242,15 @@ Backend генерирует EAN-13 для книг и локаций. Для в
 
 - `RABBIT_URL` — адрес подключения к RabbitMQ;
 - `RABBIT_QUEUE` — имя очереди, по умолчанию `print_queue`.
+
+## Как запускать на сервере с новыми секретами
+
+1. Создай файл `.env` рядом с `docker-compose.yml` на основе [.env.example](/home/qwerty/elibrary/.env.example).
+2. Заполни в нем новые значения как минимум для `POSTGRES_PASSWORD`, `RABBITMQ_DEFAULT_PASS`, `JWT_SECRET`, `DB_URL` и `RABBIT_URL`.
+3. Проверь, что пароли внутри `DB_URL` и `RABBIT_URL` совпадают с `POSTGRES_PASSWORD` и `RABBITMQ_DEFAULT_PASS`.
+4. Запусти `docker compose up -d --build`.
+
+Для запуска backend без Docker задай те же `DB_URL`, `JWT_SECRET` и `RABBIT_URL` через переменные окружения сервиса (`systemd EnvironmentFile`, секреты CI/CD, Ansible vault, и т.д.), затем запускай `go run ./cmd/server` или свой собранный бинарник.
 
 Где это в проекте:
 

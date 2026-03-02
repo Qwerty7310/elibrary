@@ -51,8 +51,8 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.DBURL != "" {
 		t.Fatalf("DBURL = %q, want empty string", cfg.DBURL)
 	}
-	if cfg.JWTSecret != "dev-secret" {
-		t.Fatalf("JWTSecret = %q, want %q", cfg.JWTSecret, "dev-secret")
+	if cfg.JWTSecret != "" {
+		t.Fatalf("JWTSecret = %q, want empty string", cfg.JWTSecret)
 	}
 	wantOrigins := []string{"http://localhost:5173", "http://localhost:3000"}
 	if !reflect.DeepEqual(cfg.CORSAllowedOrigins, wantOrigins) {
@@ -66,6 +66,9 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if cfg.RabbitQueue != "print_queue" {
 		t.Fatalf("RabbitQueue = %q, want %q", cfg.RabbitQueue, "print_queue")
+	}
+	if cfg.RabbitURL != "" {
+		t.Fatalf("RabbitURL = %q, want empty string", cfg.RabbitURL)
 	}
 }
 
@@ -94,4 +97,24 @@ func TestLoadOverrides(t *testing.T) {
 	if cfg.RabbitURL != "amqp://guest:guest@localhost:5672/" || cfg.RabbitQueue != "jobs" {
 		t.Fatalf("rabbit settings mismatch: %+v", cfg)
 	}
+}
+
+func TestValidate(t *testing.T) {
+	t.Run("missing required values", func(t *testing.T) {
+		cfg := &Config{}
+		if err := cfg.Validate(); err == nil {
+			t.Fatal("Validate() error = nil, want error")
+		}
+	})
+
+	t.Run("all required values provided", func(t *testing.T) {
+		cfg := &Config{
+			DBURL:     "postgres://db",
+			JWTSecret: "secret",
+			RabbitURL: "amqp://guest:guest@localhost:5672/",
+		}
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("Validate() error = %v, want nil", err)
+		}
+	})
 }
