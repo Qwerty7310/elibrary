@@ -34,13 +34,36 @@ jobs:
 
       - name: Deploy containers
         uses: appleboy/ssh-action@v0.1.7
+        env:
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          RABBITMQ_DEFAULT_USER: ${{ secrets.RABBITMQ_DEFAULT_USER }}
+          RABBITMQ_DEFAULT_PASS: ${{ secrets.RABBITMQ_DEFAULT_PASS }}
+          DB_URL: ${{ secrets.DB_URL }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          RABBIT_URL: ${{ secrets.RABBIT_URL }}
+          RABBIT_QUEUE: ${{ secrets.RABBIT_QUEUE }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
+          envs: POSTGRES_DB,POSTGRES_USER,POSTGRES_PASSWORD,RABBITMQ_DEFAULT_USER,RABBITMQ_DEFAULT_PASS,DB_URL,JWT_SECRET,RABBIT_URL,RABBIT_QUEUE
           script: |
             cd /home/${{ secrets.SERVER_USER }}/elibrary
             mkdir -p /home/root/elibrary-data/images
+
+            missing=0
+            for var in POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD RABBITMQ_DEFAULT_USER RABBITMQ_DEFAULT_PASS DB_URL JWT_SECRET RABBIT_URL; do
+              if [ -z "$(printenv "$var")" ]; then
+                echo "Missing required deploy secret: $var"
+                missing=1
+              fi
+            done
+            if [ "$missing" -ne 0 ]; then
+              exit 1
+            fi
+
             docker compose down || true
             docker compose build --pull
             docker compose up -d
